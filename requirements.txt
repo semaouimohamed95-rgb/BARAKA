@@ -1,4 +1,5 @@
+# requirements.txt
 python-telegram-bot==20.4
-Pillow==10.0.0
-arabic-reshaper==2.1.3
-py-bidi==0.4.2
+Pillow==10.0.0 --only-binary=:all:
+arabic-reshaper
+python-bidi
