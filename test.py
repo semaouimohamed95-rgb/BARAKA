@@ -1,5 +1,4 @@
-# bot_flask.py
-
+# bot_conversation.py
 import os
 from io import BytesIO
 from threading import Thread
@@ -8,31 +7,34 @@ import arabic_reshaper
 from bidi.algorithm import get_display
 from flask import Flask
 from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
+from telegram.ext import (
+    ApplicationBuilder,
+    CommandHandler,
+    ContextTypes,
+    ConversationHandler,
+    MessageHandler,
+    filters,
+)
 
 # ----------------------
 # Config
 # ----------------------
-TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")  # Set in Render environment variables
-
-# Certificate template & fonts
+TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 TEMPLATE_PATH = "certificate_template.png"
 FONT_PATH_BOLD = "NotoKufiArabic-Bold.ttf"
 
-# Positions
 POSITIONS = {
     "h1": (651, 470),
     "name": (650, 545),
     "role": (652, 615),
-    "body": 665  # starting y-coordinate for body
+    "body": 665,
 }
-X_LEFT, X_RIGHT = 28, 1241  # body text limits
+X_LEFT, X_RIGHT = 28, 1241
 
 # ----------------------
-# Flask server (keeps Render free tier alive)
+# Flask to keep Render alive
 # ----------------------
 app = Flask(__name__)
-
 @app.route("/")
 def home():
     return "Certificate Bot is running!"
@@ -54,22 +56,18 @@ def draw_centered_text(draw, x_center, y, text, font, fill="black"):
     return h
 
 def generate_certificate(h1_text, name_text, role_text, body_text):
-    # Load template
     img = Image.open(TEMPLATE_PATH).convert("RGB")
     draw = ImageDraw.Draw(img)
 
-    # Fonts
     font_h1 = ImageFont.truetype(FONT_PATH_BOLD, 40)
     font_name = ImageFont.truetype(FONT_PATH_BOLD, 40)
     font_role = ImageFont.truetype(FONT_PATH_BOLD, 30)
     font_body = ImageFont.truetype(FONT_PATH_BOLD, 40)
 
-    # Draw h1, name, role
     draw_centered_text(draw, POSITIONS["h1"][0], POSITIONS["h1"][1], h1_text, font_h1, "black")
     draw_centered_text(draw, POSITIONS["name"][0], POSITIONS["name"][1], name_text, font_name, "white")
     draw_centered_text(draw, POSITIONS["role"][0], POSITIONS["role"][1], role_text, font_role, "green")
 
-    # Body: wrap text within x_left/x_right
     y_body = POSITIONS["body"]
     x_center_body = (X_LEFT + X_RIGHT) // 2
     words = body_text.split()
@@ -88,13 +86,11 @@ def generate_certificate(h1_text, name_text, role_text, body_text):
     if current_line:
         lines.append(current_line)
 
-    # Draw body lines
     sample_h = draw.textbbox((0, 0), get_display(arabic_reshaper.reshape("أ")), font=font_body)[3]
     for line in lines:
         draw_centered_text(draw, x_center_body, y_body, line, font_body, "black")
         y_body += sample_h + 2
 
-    # Save to BytesIO for Telegram
     bio = BytesIO()
     bio.name = "certificate.png"
     img.save(bio, "PNG")
@@ -102,47 +98,65 @@ def generate_certificate(h1_text, name_text, role_text, body_text):
     return bio
 
 # ----------------------
-# Telegram handlers
+# Conversation states
 # ----------------------
+H1, NAME, ROLE, BODY = range(4)
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "مرحباً! أرسل لي البيانات بهذا الشكل:\n"
-        "/generate\nh1: ...\nname: ...\nrole: ...\nbody: ..."
+    await update.message.reply_text("مرحباً! من فضلك أدخل نص H1:")
+    return H1
+
+async def h1_step(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data["h1"] = update.message.text
+    await update.message.reply_text("الآن أدخل الاسم:")
+    return NAME
+
+async def name_step(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data["name"] = update.message.text
+    await update.message.reply_text("الآن أدخل الدور (role):")
+    return ROLE
+
+async def role_step(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data["role"] = update.message.text
+    await update.message.reply_text("وأخيراً، أدخل نص body:")
+    return BODY
+
+async def body_step(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data["body"] = update.message.text
+
+    bio = generate_certificate(
+        h1_text=context.user_data["h1"],
+        name_text=context.user_data["name"],
+        role_text=context.user_data["role"],
+        body_text=context.user_data["body"],
     )
 
-async def generate(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    try:
-        text = update.message.text.split("\n")[1:]  # skip /generate line
-        data = {}
-        for line in text:
-            if ":" in line:
-                key, value = line.split(":", 1)
-                data[key.strip().lower()] = value.strip()
+    await update.message.reply_photo(photo=bio)
+    await update.message.reply_text("تم إنشاء الشهادة بنجاح ✅")
+    return ConversationHandler.END
 
-        required_keys = ["h1", "name", "role", "body"]
-        if not all(k in data for k in required_keys):
-            await update.message.reply_text("يجب إرسال جميع الحقول: h1, name, role, body")
-            return
-
-        bio = generate_certificate(
-            h1_text=data["h1"],
-            name_text=data["name"],
-            role_text=data["role"],
-            body_text=data["body"]
-        )
-        await update.message.reply_photo(photo=bio)
-    except Exception as e:
-        await update.message.reply_text(f"حدث خطأ: {e}")
+async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("تم إلغاء العملية.")
+    return ConversationHandler.END
 
 # ----------------------
 # Run bot + Flask
 # ----------------------
 if __name__ == "__main__":
-    # Start Flask in a thread
     Thread(target=run_flask).start()
 
-    # Start Telegram bot
     bot_app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
-    bot_app.add_handler(CommandHandler("start", start))
-    bot_app.add_handler(CommandHandler("generate", generate))
+
+    conv_handler = ConversationHandler(
+        entry_points=[CommandHandler("start", start)],
+        states={
+            H1: [MessageHandler(filters.TEXT & ~filters.COMMAND, h1_step)],
+            NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, name_step)],
+            ROLE: [MessageHandler(filters.TEXT & ~filters.COMMAND, role_step)],
+            BODY: [MessageHandler(filters.TEXT & ~filters.COMMAND, body_step)],
+        },
+        fallbacks=[CommandHandler("cancel", cancel)],
+    )
+
+    bot_app.add_handler(conv_handler)
     bot_app.run_polling()
