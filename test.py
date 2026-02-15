@@ -1,7 +1,4 @@
-# bot_conversation.py
-import os
-from io import BytesIO
-from threading import# bot_webhook.py
+# bot_webhook.py
 
 import os
 from io import BytesIO
@@ -363,4 +360,5 @@ if __name__ == "__main__":
 
     bot_app.add_handler(conv_handler)
     bot_app.run_polling()
+
 
