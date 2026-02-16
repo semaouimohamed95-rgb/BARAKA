@@ -19,8 +19,7 @@ from telegram.ext import (
 # ----------------------
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN") or "YOUR_TOKEN_HERE"
 PORT = int(os.environ.get("PORT", 10000))
-RENDER_NAME = os.environ.get("RENDER_SERVICE_NAME")
-WEBHOOK_URL = f"https://{RENDER_NAME}.onrender.com/{TELEGRAM_TOKEN}" if RENDER_NAME else None
+WEBHOOK_URL = os.environ.get("WEBHOOK_URL") or f"https://your-app.onrender.com/{TELEGRAM_TOKEN}"
 
 TEMPLATE_PATH = "certificate_template.png"
 FONT_PATH = "NotoKufiArabic-Bold.ttf"
@@ -31,19 +30,20 @@ POSITIONS = {
     "role": (652, 615),
     "body": 665
 }
+
 X_LEFT, X_RIGHT = 28, 1241
 CHOICE, NAME, ROLE, BODY = range(4)
 
 # ----------------------
-# Arabic helpers
+# Arabic Helpers
 # ----------------------
 def convert_arabic(text: str) -> str:
     reshaped = arabic_reshaper.reshape(text)
     return get_display(reshaped)
 
-def draw_centered(draw, x, y, logical_text, font, fill="black"):
-    visual_text = convert_arabic(logical_text)
-    draw.text((x, y), visual_text, font=font, fill=fill, anchor="mm")
+def draw_centered(draw, x, y, text, font, fill="black"):
+    visual = convert_arabic(text)
+    draw.text((x, y), visual, font=font, fill=fill, anchor="mm")
 
 def wrap_text(draw, text, font, max_width):
     words = text.split()
@@ -165,7 +165,8 @@ if __name__ == "__main__":
 
     app.add_handler(conv_handler)
 
-    # ---------- RUN WEBHOOK ----------
+    # ---------- Run on Render / Webhook ----------
+    print("Bot running on Render with webhook...")
     app.run_webhook(
         listen="0.0.0.0",
         port=PORT,
