@@ -1,6 +1,5 @@
-Flask==3.1.0
-fastapi[standard]==0.113.0
-python-telegram-bot[webhooks]==20.4
-Pillow==12.1.1 --only-binary=:all:
-arabic-reshaper
-python-bidi
+Pillow==12.1.1
+arabic-reshaper==3.0.0
+python-bidi==0.6.7
+python-telegram-bot==22.6
+Flask==3.0.2
