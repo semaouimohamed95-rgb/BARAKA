@@ -104,7 +104,7 @@ def generate_certificate(choice_word, name, role, star_text):
     return bio
 
 # ----------------------
-# Handlers
+# Telegram Handlers
 # ----------------------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
@@ -148,7 +148,7 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 # ----------------------
-# Flask for Render
+# Flask for Render Web
 # ----------------------
 app_web = Flask(__name__)
 bot = Bot(token=TELEGRAM_TOKEN)
@@ -164,7 +164,6 @@ conv_handler = ConversationHandler(
     },
     fallbacks=[CommandHandler("cancel", cancel)],
 )
-
 app_bot.add_handler(conv_handler)
 
 @app_web.route("/", methods=["GET"])
@@ -179,13 +178,19 @@ def telegram_webhook():
     return jsonify({"ok": True})
 
 # ----------------------
-# Main
+# Main: Local / Render
 # ----------------------
 if __name__ == "__main__":
-    if os.environ.get("RENDER") == "true":
-        # Set webhook
-        bot.set_webhook(WEBHOOK_URL)
-        app_web.run(host="0.0.0.0", port=PORT)
-    else:
+    # ---------- LOCAL POLLING ----------
+    if os.environ.get("RENDER") != "true":
         print("Bot running locally with polling...")
         app_bot.run_polling()
+    
+    # ---------- RENDER / PRODUCTION WEBHOOK ----------
+    else:
+        async def start_webhook():
+            await bot.set_webhook(WEBHOOK_URL)
+            app_web.run(host="0.0.0.0", port=PORT)
+
+        print("Bot running on Render with webhook...")
+        asyncio.run(start_webhook())
