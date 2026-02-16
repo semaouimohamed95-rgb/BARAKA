@@ -1,5 +1,6 @@
 import os
 import asyncio
+import threading
 from io import BytesIO
 from flask import Flask, request
 from PIL import Image, ImageDraw, ImageFont
@@ -21,9 +22,9 @@ from telegram.ext import (
     filters,
 )
 
-# ----------------------
-# Config
-# ----------------------
+# =====================================================
+# CONFIG
+# =====================================================
 
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 
@@ -33,17 +34,17 @@ FONT_PATH = os.path.join(BASE_DIR, "NotoKufiArabic-Bold.ttf")
 
 POSITIONS = {
     "h1": (651, 470),
-    "name": (650, 600),
-    "role": (652, 655),
+    "name": (650, 545),
+    "role": (652, 615),
     "body": 665
 }
 
 X_LEFT, X_RIGHT = 28, 1241
 CHOICE, NAME, ROLE, BODY = range(4)
 
-# ----------------------
-# Flask App
-# ----------------------
+# =====================================================
+# FLASK
+# =====================================================
 
 appd = Flask(__name__)
 
@@ -52,17 +53,18 @@ def home():
     return "Bot is alive", 200
 
 
-# ----------------------
-# Arabic Processing
-# ----------------------
+# =====================================================
+# ARABIC PROCESSING
+# =====================================================
 
 def convert_arabic(text: str) -> str:
-    return text
+    reshaped = arabic_reshaper.reshape(text)
+    return get_display(reshaped)
 
 
-# ----------------------
-# Drawing Helpers
-# ----------------------
+# =====================================================
+# IMAGE GENERATION
+# =====================================================
 
 def draw_centered(draw, x, y, logical_text, font, fill="black"):
     visual_text = convert_arabic(logical_text)
@@ -134,9 +136,9 @@ def generate_certificate(choice_word, name, role, star_text):
     return bio
 
 
-# ----------------------
-# Telegram Handlers
-# ----------------------
+# =====================================================
+# TELEGRAM HANDLERS
+# =====================================================
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
@@ -190,12 +192,17 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 
-# ----------------------
-# Telegram Application Setup
-# ----------------------
+# =====================================================
+# TELEGRAM APPLICATION SETUP
+# =====================================================
 
 loop = asyncio.new_event_loop()
-asyncio.set_event_loop(loop)
+
+def start_loop(loop):
+    asyncio.set_event_loop(loop)
+    loop.run_forever()
+
+threading.Thread(target=start_loop, args=(loop,), daemon=True).start()
 
 application = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
 
@@ -212,27 +219,33 @@ conv = ConversationHandler(
 
 application.add_handler(conv)
 
-loop.run_until_complete(application.initialize())
-loop.run_until_complete(application.start())
+async def init_bot():
+    await application.initialize()
+    await application.start()
+
+asyncio.run_coroutine_threadsafe(init_bot(), loop)
 
 
-# ----------------------
-# Webhook Endpoint
-# ----------------------
+# =====================================================
+# WEBHOOK
+# =====================================================
 
 @appd.route(f"/webhook/{TELEGRAM_TOKEN}", methods=["POST"])
 def telegram_webhook():
     data = request.get_json(force=True)
     update = Update.de_json(data, application.bot)
 
-    loop.create_task(application.process_update(update))
+    asyncio.run_coroutine_threadsafe(
+        application.process_update(update),
+        loop
+    )
 
     return "OK", 200
 
 
-# ----------------------
-# Run Flask
-# ----------------------
+# =====================================================
+# RUN
+# =====================================================
 
 if __name__ == "__main__":
     appd.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
