@@ -3,8 +3,6 @@
 import os
 from io import BytesIO
 from PIL import Image, ImageDraw, ImageFont
-import arabic_reshaper
-from bidi.algorithm import get_display
 
 from telegram import Update
 from telegram.ext import (
@@ -40,45 +38,44 @@ POSITIONS = {
 
 X_LEFT, X_RIGHT = 28, 1241
 
-
 # ----------------------
 # Conversation states
 # ----------------------
 H1, NAME, ROLE, BODY = range(4)
-
-
-# ----------------------
-# RTL Helper
-# ----------------------
-def rtl(text: str) -> str:
-    """
-    Convert logical Arabic text to proper visual RTL text.
-    """
-    reshaped = arabic_reshaper.reshape(text)
-    return get_display(reshaped, base_dir='R')
-
 
 # ----------------------
 # Drawing Functions
 # ----------------------
 def draw_centered_text(draw, x_center, y, text, font, fill="black"):
     """
-    Draw centered RTL text.
+    Draw centered Arabic text using native RTL support.
     """
-    text_visual = rtl(text)
+    bbox = draw.textbbox(
+        (0, 0),
+        text,
+        font=font,
+        direction="rtl",
+        language="ar"
+    )
 
-    bbox = draw.textbbox((0, 0), text_visual, font=font)
     w = bbox[2] - bbox[0]
     h = bbox[3] - bbox[1]
 
-    draw.text((x_center - w // 2, y - h // 2), text_visual, font=font, fill=fill)
+    draw.text(
+        (x_center - w // 2, y - h // 2),
+        text,
+        font=font,
+        fill=fill,
+        direction="rtl",
+        language="ar"
+    )
+
     return h
 
 
 def wrap_rtl_text(draw, text, font, max_width):
     """
-    Wrap logical Arabic text into multiple lines
-    without breaking RTL order.
+    Wrap Arabic text correctly while measuring width in RTL mode.
     """
     words = text.split()
     lines = []
@@ -87,9 +84,14 @@ def wrap_rtl_text(draw, text, font, max_width):
     for word in words:
         test_line = f"{current_line} {word}".strip()
 
-        # Only reshape for width measurement
-        test_visual = rtl(test_line)
-        bbox = draw.textbbox((0, 0), test_visual, font=font)
+        bbox = draw.textbbox(
+            (0, 0),
+            test_line,
+            font=font,
+            direction="rtl",
+            language="ar"
+        )
+
         width = bbox[2] - bbox[0]
 
         if width <= max_width:
@@ -126,13 +128,18 @@ def generate_certificate(h1_text, name_text, role_text, body_text):
 
     lines = wrap_rtl_text(draw, body_text, font_body, max_width)
 
-    # Measure line height properly
-    sample_bbox = draw.textbbox((0, 0), rtl("أ"), font=font_body)
+    sample_bbox = draw.textbbox(
+        (0, 0),
+        "أ",
+        font=font_body,
+        direction="rtl",
+        language="ar"
+    )
     line_height = sample_bbox[3] - sample_bbox[1]
 
     for line in lines:
         draw_centered_text(draw, x_center_body, y_body, line, font_body, "black")
-        y_body += line_height + 10  # spacing
+        y_body += line_height + 10
 
     bio = BytesIO()
     bio.name = "certificate.png"
@@ -213,5 +220,3 @@ if __name__ == "__main__":
         url_path=TELEGRAM_TOKEN,
         webhook_url=WEBHOOK_URL,
     )
-
-
