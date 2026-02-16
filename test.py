@@ -17,9 +17,12 @@ from telegram.ext import (
     MessageHandler,
     CallbackQueryHandler,
     filters,
+    Application,
 )
 
-from flask import Flask
+from flask import Flask, request, Response
+import asyncio
+from asgiref.wsgi import WsgiToAsgi  # bridge if needed, but we use async route
 
 # ----------------------
 # Config
@@ -37,6 +40,8 @@ POSITIONS = {
 
 X_LEFT, X_RIGHT = 28, 1241
 CHOICE, NAME, ROLE, BODY = range(4)
+
+WEBHOOK_PATH = f"/{TELEGRAM_TOKEN}"
 
 # ----------------------
 # Arabic convert
@@ -56,11 +61,6 @@ def draw_centered(draw, x, y, text, font, fill="black", already_visual=False):
     draw.text((x, y), visual_text, font=font, fill=fill, anchor="mm")
 
 def wrap_text(draw, text, font, max_width):
-    """
-    Wraps logical (original order) text into lines.
-    Uses reshaped + bidi only for accurate width measurement.
-    Returns list of logical lines.
-    """
     words = text.split()
     lines = []
     current = ""
@@ -70,7 +70,6 @@ def wrap_text(draw, text, font, max_width):
         visual_test = get_display(reshaped_test)
         bbox = draw.textbbox((0, 0), visual_test, font=font)
         width = bbox[2] - bbox[0]
-        
         if width <= max_width:
             current = test_line
         else:
@@ -85,8 +84,14 @@ def generate_certificate(choice_word, name, role, star_text):
     img = Image.open(TEMPLATE_PATH).convert("RGB")
     draw = ImageDraw.Draw(img)
 
-    font_big = ImageFont.truetype(FONT_PATH, 40)
-    font_role = ImageFont.truetype(FONT_PATH, 30)
+    try:
+        font_big = ImageFont.truetype(FONT_PATH, 40)
+        font_role = ImageFont.truetype(FONT_PATH, 30)
+        print("Fonts loaded successfully")
+    except Exception as e:
+        print(f"Font load error: {e}")
+        font_big = ImageFont.load_default()
+        font_role = ImageFont.load_default()
 
     h1 = f"ببالغ الحزن والأسى وبقلوب راضية بقضاء الله وقدره تلقينا نبأ {choice_word}"
     body = (
@@ -97,19 +102,16 @@ def generate_certificate(choice_word, name, role, star_text):
         "ويسكنه الفردوس الأعلى ويلهم ذويه الصبر والسلوان."
     )
 
-    # Single-line texts (use original function)
     draw_centered(draw, *POSITIONS["h1"], h1, font_big)
     draw_centered(draw, *POSITIONS["name"], name, font_big, "white")
     draw_centered(draw, *POSITIONS["role"], role, font_role, "green")
 
-    # Multi-line body - wrap logical text, then process each line individually
     y = POSITIONS["body"]
     center_x = (X_LEFT + X_RIGHT) // 2
     max_width = X_RIGHT - X_LEFT
 
     logical_lines = wrap_text(draw, body, font_big, max_width)
 
-    # Line height calculation
     sample_bbox = draw.textbbox((0, 0), convert_arabic("أ"), font=font_big)
     line_height = sample_bbox[3] - sample_bbox[1]
 
@@ -126,7 +128,7 @@ def generate_certificate(choice_word, name, role, star_text):
     return bio
 
 # ----------------------
-# Telegram Handlers
+# Telegram Handlers (same as before)
 # ----------------------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
@@ -170,18 +172,31 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 # ----------------------
-# Flask part
+# Flask + Webhook setup
 # ----------------------
 flask_app = Flask(__name__)
 
-@flask_app.route('/')
+application: Application = None  # global, set later
+
+@flask_app.route('/', methods=['GET'])
 def hello():
     return """
     <h1 style="text-align: center; margin-top: 100px; font-family: Arial, sans-serif;">
         مرحباً بالعالم 🌍<br>
-        <small>Hello World from Flask!</small>
+        <small>Hello World from Flask + Telegram Bot!</small>
     </h1>
     """
+
+@flask_app.route(WEBHOOK_PATH, methods=['POST'])
+async def webhook():
+    if request.headers.get('content-type') == 'application/json':
+        json_data = request.get_json(silent=True)
+        if json_data:
+            update = Update.de_json(json_data, application.bot)
+            if update:
+                await application.process_update(update)
+        return Response(status=200)
+    return Response(status=403)
 
 # ----------------------
 # Main
@@ -189,14 +204,16 @@ def hello():
 if __name__ == "__main__":
     import threading
 
-    # Debug: confirm font & template exist
     print("Current working dir:", os.getcwd())
     print("Font exists?", os.path.exists(FONT_PATH))
     print("Template exists?", os.path.exists(TEMPLATE_PATH))
 
-    # Build Telegram app
-    print("Building Telegram application...")
-    app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
+    # Build the application
+    application = (
+        ApplicationBuilder()
+        .token(TELEGRAM_TOKEN)
+        .build()
+    )
 
     conv = ConversationHandler(
         entry_points=[CommandHandler("start", start)],
@@ -209,27 +226,29 @@ if __name__ == "__main__":
         fallbacks=[CommandHandler("cancel", cancel)],
     )
 
-    app.add_handler(conv)
+    application.add_handler(conv)
 
-    def run_telegram_bot():
-        print("Telegram bot is starting (polling)...")
-        app.run_polling(
+    async def set_webhook():
+        port = int(os.environ.get("PORT", 5000))
+        host = os.environ.get("RENDER_EXTERNAL_HOSTNAME")  # Render sets this
+        if not host:
+            host = "127.0.0.1"  # fallback for local
+        webhook_url = f"https://{host}{WEBHOOK_PATH}"
+        await application.bot.set_webhook(
+            url=webhook_url,
             allowed_updates=Update.ALL_TYPES,
-            drop_pending_updates=False,
+            drop_pending_updates=True  # clean old updates
         )
+        print(f"Webhook set to: {webhook_url}")
 
-    def run_flask():
-        print("Starting Flask server on http://0.0.0.0:5000 ...")
-        flask_app.run(
-            host="0.0.0.0",
-            port=5000,
-            debug=False,
-            use_reloader=False
-        )
+    # Set webhook (only once, at startup)
+    asyncio.run(set_webhook())
 
-    # Flask in background
-    flask_thread = threading.Thread(target=run_flask, daemon=True)
-    flask_thread.start()
-
-    # Telegram in main thread
-    run_telegram_bot()
+    # Run Flask (blocking, receives webhook POSTs from Telegram)
+    print(f"Starting Flask + webhook on port {os.environ.get('PORT', 5000)} ...")
+    flask_app.run(
+        host="0.0.0.0",
+        port=int(os.environ.get("PORT", 5000)),
+        debug=False,
+        use_reloader=False
+    )
