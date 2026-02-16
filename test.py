@@ -3,7 +3,6 @@ from io import BytesIO
 from PIL import Image, ImageDraw, ImageFont
 import arabic_reshaper
 from bidi.algorithm import get_display
-
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, Bot
 from telegram.ext import (
     ApplicationBuilder,
@@ -14,14 +13,16 @@ from telegram.ext import (
     CallbackQueryHandler,
     filters,
 )
-
 from flask import Flask, request, jsonify
+import asyncio
 
 # ----------------------
 # Config
 # ----------------------
-TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
-WEBHOOK_URL = os.environ.get("WEBHOOK_URL")  # e.g., "https://your-app.onrender.com/" + TELEGRAM_TOKEN
+TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN") or "YOUR_TOKEN_HERE"
+PORT = int(os.environ.get("PORT", 10000))
+WEBHOOK_URL = os.environ.get("WEBHOOK_URL") or f"https://your-app.onrender.com/{TELEGRAM_TOKEN}"
+
 TEMPLATE_PATH = "certificate_template.png"
 FONT_PATH = "NotoKufiArabic-Bold.ttf"
 
@@ -31,7 +32,6 @@ POSITIONS = {
     "role": (652, 615),
     "body": 665
 }
-
 X_LEFT, X_RIGHT = 28, 1241
 CHOICE, NAME, ROLE, BODY = range(4)
 
@@ -39,29 +39,36 @@ CHOICE, NAME, ROLE, BODY = range(4)
 # Arabic helpers
 # ----------------------
 def convert_arabic(text: str) -> str:
-    return get_display(arabic_reshaper.reshape(text))
+    reshaped = arabic_reshaper.reshape(text)
+    return get_display(reshaped)
 
 def draw_centered(draw, x, y, logical_text, font, fill="black"):
-    draw.text((x, y), convert_arabic(logical_text), font=font, fill=fill, anchor="mm")
+    visual_text = convert_arabic(logical_text)
+    draw.text((x, y), visual_text, font=font, fill=fill, anchor="mm")
 
 def wrap_text(draw, text, font, max_width):
     words = text.split()
-    lines, current = [], ""
+    lines = []
+    current = ""
     for word in words:
         test_line = f"{current} {word}".strip()
-        bbox = draw.textbbox((0, 0), convert_arabic(test_line), font=font)
+        visual = convert_arabic(test_line)
+        bbox = draw.textbbox((0, 0), visual, font=font)
         width = bbox[2] - bbox[0]
         if width <= max_width:
             current = test_line
         else:
-            if current: lines.append(current)
+            if current:
+                lines.append(current)
             current = word
-    if current: lines.append(current)
+    if current:
+        lines.append(current)
     return lines
 
 def generate_certificate(choice_word, name, role, star_text):
     img = Image.open(TEMPLATE_PATH).convert("RGB")
     draw = ImageDraw.Draw(img)
+
     font_big = ImageFont.truetype(FONT_PATH, 40)
     font_role = ImageFont.truetype(FONT_PATH, 30)
 
@@ -81,8 +88,11 @@ def generate_certificate(choice_word, name, role, star_text):
     y = POSITIONS["body"]
     center_x = (X_LEFT + X_RIGHT) // 2
     max_width = X_RIGHT - X_LEFT
+
     lines = wrap_text(draw, body, font_big, max_width)
-    line_height = draw.textbbox((0, 0), convert_arabic("أ"), font=font_big)[3]
+    sample_bbox = draw.textbbox((0, 0), convert_arabic("أ"), font=font_big)
+    line_height = sample_bbox[3] - sample_bbox[1]
+
     for line in lines:
         draw_centered(draw, center_x, y, line, font_big)
         y += line_height + 20
@@ -94,7 +104,7 @@ def generate_certificate(choice_word, name, role, star_text):
     return bio
 
 # ----------------------
-# Telegram Handlers
+# Handlers
 # ----------------------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
@@ -138,28 +148,13 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 # ----------------------
-# Flask + Telegram Webhook
+# Flask for Render
 # ----------------------
 app_web = Flask(__name__)
-
-@app_web.route("/", methods=["GET"])
-def home():
-    return "<h1>Certificate Bot is running ✅</h1>"
-
-@app_web.route(f"/{TELEGRAM_TOKEN}", methods=["POST"])
-def telegram_webhook():
-    data = request.get_json(force=True)
-    update = Update.de_json(data, bot)
-    asyncio.run(app.process_update(update))  # handle the update
-    return jsonify({"ok": True})
-
-# ----------------------
-# Main
-# ----------------------
 bot = Bot(token=TELEGRAM_TOKEN)
-app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
+app_bot = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
 
-conv = ConversationHandler(
+conv_handler = ConversationHandler(
     entry_points=[CommandHandler("start", start)],
     states={
         CHOICE: [CallbackQueryHandler(choice_handler)],
@@ -170,13 +165,27 @@ conv = ConversationHandler(
     fallbacks=[CommandHandler("cancel", cancel)],
 )
 
-app.add_handler(conv)
+app_bot.add_handler(conv_handler)
 
-# Set webhook when deployed on Render
-if os.environ.get("RENDER") == "true":
-    bot.set_webhook(WEBHOOK_URL)
+@app_web.route("/", methods=["GET"])
+def home():
+    return "<h1>Certificate Bot is running ✅</h1>"
 
-# Run Flask
+@app_web.route(f"/{TELEGRAM_TOKEN}", methods=["POST"])
+def telegram_webhook():
+    data = request.get_json(force=True)
+    update = Update.de_json(data, bot)
+    asyncio.run(app_bot.process_update(update))
+    return jsonify({"ok": True})
+
+# ----------------------
+# Main
+# ----------------------
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 10000))
-    app_web.run(host="0.0.0.0", port=port)
+    if os.environ.get("RENDER") == "true":
+        # Set webhook
+        bot.set_webhook(WEBHOOK_URL)
+        app_web.run(host="0.0.0.0", port=PORT)
+    else:
+        print("Bot running locally with polling...")
+        app_bot.run_polling()
