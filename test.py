@@ -175,28 +175,47 @@ def hello():
 if __name__ == "__main__":
     import threading
 
-    # Start Telegram bot in a background thread
-    def run_telegram_bot():
-        print("Telegram bot is starting...")
-        app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
+    # Create the PTB Application once (outside threads)
+    print("Building Telegram application...")
+    app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
 
-        conv = ConversationHandler(
-            entry_points=[CommandHandler("start", start)],
-            states={
-                CHOICE: [CallbackQueryHandler(choice_handler)],
-                NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, name_input)],
-                ROLE: [MessageHandler(filters.TEXT & ~filters.COMMAND, role_input)],
-                BODY: [MessageHandler(filters.TEXT & ~filters.COMMAND, body_input)],
-            },
-            fallbacks=[CommandHandler("cancel", cancel)],
+    conv = ConversationHandler(
+        entry_points=[CommandHandler("start", start)],
+        states={
+            CHOICE: [CallbackQueryHandler(choice_handler)],
+            NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, name_input)],
+            ROLE: [MessageHandler(filters.TEXT & ~filters.COMMAND, role_input)],
+            BODY: [MessageHandler(filters.TEXT & ~filters.COMMAND, body_input)],
+        },
+        fallbacks=[CommandHandler("cancel", cancel)],
+    )
+
+    app.add_handler(conv)
+
+    # Function to run the bot (blocking)
+    def run_telegram_bot():
+        print("Telegram bot is starting (polling)...")
+        # You can add drop_pending_updates=True if you want
+        app.run_polling(
+            allowed_updates=Update.ALL_TYPES,
+            drop_pending_updates=False,   # ← change if needed
+            # stop_signals=None           # ← optional: disables signal handling (try if still issues)
         )
 
-        app.add_handler(conv)
-        app.run_polling(allowed_updates=Update.ALL_TYPES)
+    # Start Flask web server in background thread
+    def run_flask():
+        print("Starting Flask server on http://0.0.0.0:5000 ...")
+        # Important: use 0.0.0.0 so Render can see it
+        flask_app.run(
+            host="0.0.0.0",
+            port=5000,
+            debug=False,           # ← turn off debug in production
+            use_reloader=False     # ← important in threaded setup
+        )
 
-    # Run Flask in main thread (or you can swap them)
-    print("Starting Flask server on http://127.0.0.1:5000 ...")
-    threading.Thread(target=run_telegram_bot, daemon=True).start()
+    # Start Flask in a daemon thread
+    flask_thread = threading.Thread(target=run_flask, daemon=True)
+    flask_thread.start()
 
-    # Flask will block here
-    flask_app.run(debug=True, use_reloader=False)
+    # Run Telegram bot in **main thread** (blocking call)
+    run_telegram_bot()
