@@ -34,8 +34,8 @@ FONT_PATH = os.path.join(BASE_DIR, "NotoKufiArabic-Bold.ttf")
 
 POSITIONS = {
     "h1": (651, 470),
-    "name": (650, 600),
-    "role": (652, 660),
+    "name": (650, 580),
+    "role": (652, 640),
     "body": 665
 }
 
@@ -248,5 +248,6 @@ def telegram_webhook():
 
 if __name__ == "__main__":
     appd.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
+
 
 
