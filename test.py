@@ -167,7 +167,7 @@ async def name_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def role_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["role"] = update.message.text
-    await update.message.reply_text("أدخل النص الذي مكان النجوم:")
+    await update.message.reply_text("أكمل بأصدق التعازي و المواساة ل(لمن؟):")
     return BODY
 
 
@@ -248,6 +248,7 @@ def telegram_webhook():
 
 if __name__ == "__main__":
     appd.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
+
 
 
 
