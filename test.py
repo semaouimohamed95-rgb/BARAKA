@@ -1,7 +1,4 @@
-#fgjk
 import os
-
-
 from io import BytesIO
 from PIL import Image, ImageDraw, ImageFont
 import arabic_reshaper
@@ -22,18 +19,15 @@ from telegram.ext import (
     filters,
 )
 
+from flask import Flask
+
 # ----------------------
 # Config
 # ----------------------
-TELEGRAM_TOKEN = "8473065940:AAEBfJD0THr7pHx93SqBrdgc2qbNfU8_lYs"  # Set this in your environment
+TELEGRAM_TOKEN = "8473065940:AAEBfJD0THr7pHx93SqBrdgc2qbNfU8_lYs"
 TEMPLATE_PATH = "certificate_template.png"
 FONT_PATH = "NotoKufiArabic-Bold.ttf"
-print("=== DEBUG: File system info on Render ===")
-print("Current working directory:", os.getcwd())
-print("Absolute path being checked:", os.path.abspath(FONT_PATH))
-print("Font file exists?", os.path.exists(FONT_PATH))
-print("Is it a file?", os.path.isfile(FONT_PATH) if os.path.exists(FONT_PATH) else "N/A")
-print("Files in current folder:", sorted(os.listdir('.')))  # ← this will show if the .ttf is really there
+
 POSITIONS = {
     "h1": (651, 470),
     "name": (650, 545),
@@ -52,21 +46,31 @@ def convert_arabic(text: str) -> str:
     return get_display(reshaped)
 
 # ----------------------
-# Drawing
+# Drawing helpers
 # ----------------------
-def draw_centered(draw, x, y, logical_text, font, fill="black"):
-    visual_text = convert_arabic(logical_text)
+def draw_centered(draw, x, y, text, font, fill="black", already_visual=False):
+    if already_visual:
+        visual_text = text
+    else:
+        visual_text = convert_arabic(text)
     draw.text((x, y), visual_text, font=font, fill=fill, anchor="mm")
 
 def wrap_text(draw, text, font, max_width):
+    """
+    Wraps logical (original order) text into lines.
+    Uses reshaped + bidi only for accurate width measurement.
+    Returns list of logical lines.
+    """
     words = text.split()
     lines = []
     current = ""
     for word in words:
-        test_line = f"{current} {word}".strip()
-        visual = convert_arabic(test_line)
-        bbox = draw.textbbox((0, 0), visual, font=font)
+        test_line = f"{current} {word}".strip() if current else word
+        reshaped_test = arabic_reshaper.reshape(test_line)
+        visual_test = get_display(reshaped_test)
+        bbox = draw.textbbox((0, 0), visual_test, font=font)
         width = bbox[2] - bbox[0]
+        
         if width <= max_width:
             current = test_line
         else:
@@ -93,20 +97,26 @@ def generate_certificate(choice_word, name, role, star_text):
         "ويسكنه الفردوس الأعلى ويلهم ذويه الصبر والسلوان."
     )
 
+    # Single-line texts (use original function)
     draw_centered(draw, *POSITIONS["h1"], h1, font_big)
     draw_centered(draw, *POSITIONS["name"], name, font_big, "white")
     draw_centered(draw, *POSITIONS["role"], role, font_role, "green")
 
+    # Multi-line body - wrap logical text, then process each line individually
     y = POSITIONS["body"]
     center_x = (X_LEFT + X_RIGHT) // 2
     max_width = X_RIGHT - X_LEFT
 
-    lines = wrap_text(draw, body, font_big, max_width)
+    logical_lines = wrap_text(draw, body, font_big, max_width)
+
+    # Line height calculation
     sample_bbox = draw.textbbox((0, 0), convert_arabic("أ"), font=font_big)
     line_height = sample_bbox[3] - sample_bbox[1]
 
-    for line in lines:
-        draw_centered(draw, center_x, y, line, font_big)
+    for logical_line in logical_lines:
+        reshaped = arabic_reshaper.reshape(logical_line)
+        visual_line = get_display(reshaped)
+        draw_centered(draw, center_x, y, visual_line, font_big, already_visual=True)
         y += line_height + 20
 
     bio = BytesIO()
@@ -116,7 +126,7 @@ def generate_certificate(choice_word, name, role, star_text):
     return bio
 
 # ----------------------
-# Handlers
+# Telegram Handlers
 # ----------------------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
@@ -159,12 +169,9 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("تم الإلغاء.")
     return ConversationHandler.END
 
-# ────────────────────────────────────────────────
-#   SEPARATE FLASK HELLO WORLD (completely independent)
-# ────────────────────────────────────────────────
-
-from flask import Flask
-
+# ----------------------
+# Flask part
+# ----------------------
 flask_app = Flask(__name__)
 
 @flask_app.route('/')
@@ -176,14 +183,18 @@ def hello():
     </h1>
     """
 
-# ────────────────────────────────────────────────
-#   Main
-# ────────────────────────────────────────────────
-
+# ----------------------
+# Main
+# ----------------------
 if __name__ == "__main__":
     import threading
 
-    # Create the PTB Application once (outside threads)
+    # Debug: confirm font & template exist
+    print("Current working dir:", os.getcwd())
+    print("Font exists?", os.path.exists(FONT_PATH))
+    print("Template exists?", os.path.exists(TEMPLATE_PATH))
+
+    # Build Telegram app
     print("Building Telegram application...")
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
 
@@ -200,33 +211,25 @@ if __name__ == "__main__":
 
     app.add_handler(conv)
 
-    # Function to run the bot (blocking)
     def run_telegram_bot():
         print("Telegram bot is starting (polling)...")
-        # You can add drop_pending_updates=True if you want
         app.run_polling(
             allowed_updates=Update.ALL_TYPES,
-            drop_pending_updates=False,   # ← change if needed
-            # stop_signals=None           # ← optional: disables signal handling (try if still issues)
+            drop_pending_updates=False,
         )
 
-    # Start Flask web server in background thread
     def run_flask():
         print("Starting Flask server on http://0.0.0.0:5000 ...")
-        # Important: use 0.0.0.0 so Render can see it
         flask_app.run(
             host="0.0.0.0",
             port=5000,
-            debug=False,           # ← turn off debug in production
-            use_reloader=False     # ← important in threaded setup
+            debug=False,
+            use_reloader=False
         )
 
-    # Start Flask in a daemon thread
+    # Flask in background
     flask_thread = threading.Thread(target=run_flask, daemon=True)
     flask_thread.start()
 
-    # Run Telegram bot in **main thread** (blocking call)
+    # Telegram in main thread
     run_telegram_bot()
-
-
-
