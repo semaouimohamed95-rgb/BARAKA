@@ -51,41 +51,52 @@ H1, NAME, ROLE, BODY = range(4)
 # RTL Helper
 # ----------------------
 def rtl(text: str) -> str:
+    """
+    Convert logical Arabic text to proper visual RTL text.
+    """
     reshaped = arabic_reshaper.reshape(text)
-    return get_display(reshaped)
+    return get_display(reshaped, base_dir='R')
 
 
 # ----------------------
 # Drawing Functions
 # ----------------------
 def draw_centered_text(draw, x_center, y, text, font, fill="black"):
-    text_rtl = rtl(text)
-    bbox = draw.textbbox((0, 0), text_rtl, font=font)
+    """
+    Draw centered RTL text.
+    """
+    text_visual = rtl(text)
+
+    bbox = draw.textbbox((0, 0), text_visual, font=font)
     w = bbox[2] - bbox[0]
     h = bbox[3] - bbox[1]
-    draw.text((x_center - w // 2, y - h // 2), text_rtl, font=font, fill=fill)
+
+    draw.text((x_center - w // 2, y - h // 2), text_visual, font=font, fill=fill)
     return h
 
 
 def wrap_rtl_text(draw, text, font, max_width):
     """
-    Proper RTL wrapping without flipping lines.
+    Wrap logical Arabic text into multiple lines
+    without breaking RTL order.
     """
-    lines = []
     words = text.split()
+    lines = []
     current_line = ""
 
     for word in words:
         test_line = f"{current_line} {word}".strip()
-        test_line_rtl = rtl(test_line)
 
-        bbox = draw.textbbox((0, 0), test_line_rtl, font=font)
+        # Only reshape for width measurement
+        test_visual = rtl(test_line)
+        bbox = draw.textbbox((0, 0), test_visual, font=font)
         width = bbox[2] - bbox[0]
 
         if width <= max_width:
             current_line = test_line
         else:
-            lines.append(current_line)
+            if current_line:
+                lines.append(current_line)
             current_line = word
 
     if current_line:
@@ -115,12 +126,13 @@ def generate_certificate(h1_text, name_text, role_text, body_text):
 
     lines = wrap_rtl_text(draw, body_text, font_body, max_width)
 
+    # Measure line height properly
     sample_bbox = draw.textbbox((0, 0), rtl("أ"), font=font_body)
     line_height = sample_bbox[3] - sample_bbox[1]
 
     for line in lines:
         draw_centered_text(draw, x_center_body, y_body, line, font_body, "black")
-        y_body += line_height + 8
+        y_body += line_height + 10  # spacing
 
     bio = BytesIO()
     bio.name = "certificate.png"
