@@ -1,3 +1,4 @@
+#fgjk
 import os
 from io import BytesIO
 from PIL import Image, ImageDraw, ImageFont
@@ -219,3 +220,4 @@ if __name__ == "__main__":
 
     # Run Telegram bot in **main thread** (blocking call)
     run_telegram_bot()
+
