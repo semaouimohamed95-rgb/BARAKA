@@ -32,14 +32,14 @@ CHOICE, NAME, ROLE, BODY = range(4)
 WEBHOOK_PATH = f"/{TELEGRAM_TOKEN}"
 
 # ────────────────────────────────────────────────
-# Arabic + Drawing (with debug prints)
+# Arabic + Drawing with debug
 # ────────────────────────────────────────────────
 def convert_arabic(text: str) -> str:
     reshaped = arabic_reshaper.reshape(text)
     visual = get_display(reshaped)
-    print(f"[TEXT DEBUG] Input: {text[:50]}...")
-    print(f"[TEXT DEBUG] Reshaped: {reshaped[:50]}...")
-    print(f"[TEXT DEBUG] Final visual (bidi): {visual[:50]}...")
+    print(f"[ARABIC DEBUG] Original: {text[:60]}...")
+    print(f"[ARABIC DEBUG] Reshaped: {reshaped[:60]}...")
+    print(f"[ARABIC DEBUG] Bidi applied: {visual[:60]}...")
     return visual
 
 def draw_centered(draw, x, y, text, font, fill="black", already_visual=False):
@@ -50,7 +50,7 @@ def draw_centered(draw, x, y, text, font, fill="black", already_visual=False):
     draw.text((x, y), visual_text, font=font, fill=fill, anchor="mm")
 
 def wrap_text(draw, text, font, max_width):
-    print("[WRAP DEBUG] Starting wrap for body")
+    print("[WRAP DEBUG] Wrapping body text...")
     words = text.split()
     lines = []
     current = ""
@@ -67,13 +67,13 @@ def wrap_text(draw, text, font, max_width):
             current = word
     if current:
         lines.append(current)
-    print(f"[WRAP DEBUG] Wrapped into {len(lines)} lines:")
-    for i, ln in enumerate(lines, 1):
-        print(f"  Line {i}: {ln}")
+    print(f"[WRAP DEBUG] Created {len(lines)} logical lines")
+    for i, line in enumerate(lines, 1):
+        print(f"  Line {i}: {line}")
     return lines
 
 def generate_certificate(choice_word, name, role, star_text):
-    print("[CERT DEBUG] Starting certificate generation")
+    print("[CERT DEBUG] Generating certificate...")
     img = Image.open(TEMPLATE_PATH).convert("RGB")
     draw = ImageDraw.Draw(img)
 
@@ -118,11 +118,11 @@ def generate_certificate(choice_word, name, role, star_text):
     bio.name = "certificate.png"
     img.save(bio, "PNG")
     bio.seek(0)
-    print("[CERT DEBUG] Certificate ready")
+    print("[CERT DEBUG] Certificate ready to send")
     return bio
 
 # ────────────────────────────────────────────────
-# Handlers (with anti-repeat fix)
+# Handlers
 # ────────────────────────────────────────────────
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [[InlineKeyboardButton("وفاة", callback_data="وفاة"),
@@ -132,7 +132,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def choice_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    print(f"[HANDLER DEBUG] Choice: {query.data}")
+    print(f"[HANDLER] Choice handler - selected: {query.data}")
     await query.answer()
     context.user_data["choice"] = query.data
     await query.edit_message_text(text="أدخل الاسم الكامل:", reply_markup=None)
@@ -164,33 +164,44 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 # ────────────────────────────────────────────────
-# Flask + Webhook
+# Flask app
 # ────────────────────────────────────────────────
 flask_app = Flask(__name__)
 application: Application = None
 
 @flask_app.route('/', methods=['GET'])
 def hello():
-    return "Bot is alive"
+    return "Bot is running (with webhook)"
 
 @flask_app.route(WEBHOOK_PATH, methods=['POST'])
 async def webhook():
+    print("[WEBHOOK] Received POST from Telegram")
     if request.headers.get('content-type') == 'application/json':
         json_data = request.get_json(silent=True)
         if json_data:
             update = Update.de_json(json_data, application.bot)
             if update:
-                print(f"[WEBHOOK DEBUG] Received update: {update.to_dict()}")
-                await application.process_update(update)
+                print("[WEBHOOK] Processing update...")
+                try:
+                    await application.process_update(update)
+                    print("[WEBHOOK] Update processed successfully")
+                except Exception as e:
+                    print(f"[WEBHOOK] Error processing update: {type(e).__name__}: {str(e)}")
+                    import traceback
+                    traceback.print_exc()
+            else:
+                print("[WEBHOOK] Could not parse update")
         return Response(status=200)
+    print("[WEBHOOK] Invalid content-type")
     return Response(status=403)
 
 # ────────────────────────────────────────────────
 # Startup
 # ────────────────────────────────────────────────
-async def startup():
+async def main():
     global application
 
+    print("[STARTUP] Building application...")
     application = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
 
     conv = ConversationHandler(
@@ -208,26 +219,29 @@ async def startup():
 
     print("[STARTUP] Initializing application...")
     await application.initialize()
-    print("[STARTUP] Initialized OK")
+    print("[STARTUP] Starting application...")
+    await application.start()
 
     host = os.environ.get("RENDER_EXTERNAL_HOSTNAME")
     if not host:
-        print("[STARTUP] Warning: No RENDER_EXTERNAL_HOSTNAME → local fallback")
         host = "127.0.0.1"
+        print("[STARTUP] Warning: using localhost fallback")
     webhook_url = f"https://{host}{WEBHOOK_PATH}"
-    print(f"[STARTUP] Setting webhook: {webhook_url}")
-    await application.bot.set_webhook(url=webhook_url, drop_pending_updates=True)
-    print("[STARTUP] Webhook set OK")
 
-async def main():
-    await startup()
+    print(f"[STARTUP] Setting webhook: {webhook_url}")
+    await application.bot.set_webhook(
+        url=webhook_url,
+        drop_pending_updates=True,
+        allowed_updates=Update.ALL_TYPES
+    )
+    print("[STARTUP] Webhook set successfully")
 
     port = int(os.environ.get("PORT", 5000))
     print(f"[STARTUP] Running Flask on port {port}")
     flask_app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
 
-    # Cleanup (rarely reached)
-    print("[SHUTDOWN] Cleaning up...")
+    # Cleanup (rarely reached in production)
+    print("[SHUTDOWN] Stopping application...")
     await application.stop()
     await application.shutdown()
 
