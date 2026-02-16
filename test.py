@@ -21,14 +21,14 @@ from telegram.ext import (
 # ----------------------
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 if not TELEGRAM_TOKEN:
-    raise ValueError("TELEGRAM_TOKEN not set in environment variables")
+    raise ValueError("TELEGRAM_TOKEN not set")
 
 PORT = int(os.environ.get("PORT", 10000))
 RENDER_NAME = os.environ.get("RENDER_SERVICE_NAME")
 WEBHOOK_URL = f"https://{RENDER_NAME}.onrender.com/{TELEGRAM_TOKEN}"
 
 TEMPLATE_PATH = "certificate_template.png"
-FONT_PATH_BOLD = "NotoKufiArabic-Bold.ttf"
+FONT_PATH = "NotoKufiArabic-Bold.ttf"
 
 POSITIONS = {
     "h1": (651, 470),
@@ -41,125 +41,105 @@ X_LEFT, X_RIGHT = 28, 1241
 
 H1, NAME, ROLE, BODY = range(4)
 
-
 # ----------------------
-# RTL Conversion (SAFE METHOD)
+# Arabic Conversion
 # ----------------------
 def convert_arabic(text: str) -> str:
-    """
-    Convert logical Arabic text into correct visual text.
-    """
     reshaped = arabic_reshaper.reshape(text)
-    bidi_text = get_display(reshaped)
-    return bidi_text
-
+    return get_display(reshaped)
 
 # ----------------------
-# Drawing Functions
+# Drawing
 # ----------------------
-def draw_centered_text(draw, x_center, y, text, font, fill="black"):
-    """
-    Draw already-converted Arabic text centered.
-    """
+def draw_centered(draw, x, y, text, font, fill="black"):
     bbox = draw.textbbox((0, 0), text, font=font)
     w = bbox[2] - bbox[0]
     h = bbox[3] - bbox[1]
+    draw.text((x - w // 2, y - h // 2), text, font=font, fill=fill)
 
-    draw.text((x_center - w // 2, y - h // 2), text, font=font, fill=fill)
-
-
-def wrap_rtl_text(draw, text, font, max_width):
-    """
-    Wrap Arabic text correctly using logical text,
-    but measure using converted visual form.
-    """
+def wrap_text(draw, text, font, max_width):
     words = text.split()
     lines = []
-    current_line = ""
+    current = ""
 
     for word in words:
-        test_line = f"{current_line} {word}".strip()
+        test_line = f"{current} {word}".strip()
+        visual = convert_arabic(test_line)
 
-        visual_test = convert_arabic(test_line)
-        bbox = draw.textbbox((0, 0), visual_test, font=font)
+        bbox = draw.textbbox((0, 0), visual, font=font)
         width = bbox[2] - bbox[0]
 
         if width <= max_width:
-            current_line = test_line
+            current = test_line
         else:
-            if current_line:
-                lines.append(current_line)
-            current_line = word
+            if current:
+                lines.append(current)
+            current = word
 
-    if current_line:
-        lines.append(current_line)
+    if current:
+        lines.append(current)
 
     return lines
 
-
-def generate_certificate(h1_text, name_text, role_text, body_text):
+def generate_certificate(h1, name, role, body):
     img = Image.open(TEMPLATE_PATH).convert("RGB")
     draw = ImageDraw.Draw(img)
 
-    font_h1 = ImageFont.truetype(FONT_PATH_BOLD, 40)
-    font_name = ImageFont.truetype(FONT_PATH_BOLD, 40)
-    font_role = ImageFont.truetype(FONT_PATH_BOLD, 30)
-    font_body = ImageFont.truetype(FONT_PATH_BOLD, 40)
+    font_h1 = ImageFont.truetype(FONT_PATH, 40)
+    font_name = ImageFont.truetype(FONT_PATH, 40)
+    font_role = ImageFont.truetype(FONT_PATH, 30)
+    font_body = ImageFont.truetype(FONT_PATH, 40)
 
-    # Convert header fields ONCE
-    h1_visual = convert_arabic(h1_text)
-    name_visual = convert_arabic(name_text)
-    role_visual = convert_arabic(role_text)
+    # Convert once
+    h1_v = convert_arabic(h1)
+    name_v = convert_arabic(name)
+    role_v = convert_arabic(role)
 
-    draw_centered_text(draw, *POSITIONS["h1"], h1_visual, font_h1, "black")
-    draw_centered_text(draw, *POSITIONS["name"], name_visual, font_name, "white")
-    draw_centered_text(draw, *POSITIONS["role"], role_visual, font_role, "green")
+    draw_centered(draw, *POSITIONS["h1"], h1_v, font_h1)
+    draw_centered(draw, *POSITIONS["name"], name_v, font_name, "white")
+    draw_centered(draw, *POSITIONS["role"], role_v, font_role, "green")
 
-    # Body
-    y_body = POSITIONS["body"]
-    x_center_body = (X_LEFT + X_RIGHT) // 2
+    y = POSITIONS["body"]
+    center_x = (X_LEFT + X_RIGHT) // 2
     max_width = X_RIGHT - X_LEFT
 
-    lines = wrap_rtl_text(draw, body_text, font_body, max_width)
+    lines = wrap_text(draw, body, font_body, max_width)
 
     sample_bbox = draw.textbbox((0, 0), convert_arabic("أ"), font=font_body)
     line_height = sample_bbox[3] - sample_bbox[1]
 
     for line in lines:
         visual_line = convert_arabic(line)
-        draw_centered_text(draw, x_center_body, y_body, visual_line, font_body, "black")
-        y_body += line_height + 10
+        draw_centered(draw, center_x, y, visual_line, font_body)
+        y += line_height + 10
 
     bio = BytesIO()
     bio.name = "certificate.png"
     img.save(bio, "PNG")
     bio.seek(0)
-
     return bio
-
 
 # ----------------------
 # Handlers
 # ----------------------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("مرحباً! لنبدأ إنشاء الشهادة.\n\nأدخل نص H1:")
+    await update.message.reply_text("أدخل نص العنوان (H1):")
     return H1
-
 
 async def h1_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["h1"] = update.message.text
+    await update.message.reply_text("أدخل الاسم:")
     return NAME
-
 
 async def name_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["name"] = update.message.text
+    await update.message.reply_text("أدخل الصفة:")
     return ROLE
-
 
 async def role_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["role"] = update.message.text
+    await update.message.reply_text("أدخل نص الجسم:")
     return BODY
-
 
 async def body_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["body"] = update.message.text
@@ -168,16 +148,15 @@ async def body_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["h1"],
         context.user_data["name"],
         context.user_data["role"],
-        context.user_data["body"],
+        context.user_data["body"]
     )
 
-    await update.message.reply_photo(photo=bio, caption="تم إنشاء الشهادة بنجاح!")
+    await update.message.reply_photo(photo=bio, caption="تم إنشاء الشهادة ✅")
     return ConversationHandler.END
-
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("تم الإلغاء.")
     return ConversationHandler.END
-
 
 # ----------------------
 # Main
@@ -186,7 +165,7 @@ if __name__ == "__main__":
 
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
 
-    conv_handler = ConversationHandler(
+    conv = ConversationHandler(
         entry_points=[CommandHandler("start", start)],
         states={
             H1: [MessageHandler(filters.TEXT & ~filters.COMMAND, h1_input)],
@@ -197,7 +176,7 @@ if __name__ == "__main__":
         fallbacks=[CommandHandler("cancel", cancel)],
     )
 
-    app.add_handler(conv_handler)
+    app.add_handler(conv)
 
     app.run_webhook(
         listen="0.0.0.0",
