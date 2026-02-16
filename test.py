@@ -4,7 +4,11 @@ from PIL import Image, ImageDraw, ImageFont
 import arabic_reshaper
 from bidi.algorithm import get_display
 
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import (
+    Update,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+)
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
@@ -18,30 +22,37 @@ from telegram.ext import (
 
 from flask import Flask, request, Response
 import asyncio
+from asgiref.wsgi import WsgiToAsgi  # bridge if needed, but we use async route
 
-# ────────────────────────────────────────────────
+# ----------------------
 # Config
-# ────────────────────────────────────────────────
+# ----------------------
 TELEGRAM_TOKEN = "8473065940:AAEBfJD0THr7pHx93SqBrdgc2qbNfU8_lYs"
 TEMPLATE_PATH = "certificate_template.png"
 FONT_PATH = "NotoKufiArabic-Bold.ttf"
 
-POSITIONS = {"h1": (651, 470), "name": (650, 545), "role": (652, 615), "body": 665}
+POSITIONS = {
+    "h1": (651, 470),
+    "name": (650, 545),
+    "role": (652, 615),
+    "body": 665
+}
+
 X_LEFT, X_RIGHT = 28, 1241
 CHOICE, NAME, ROLE, BODY = range(4)
+
 WEBHOOK_PATH = f"/{TELEGRAM_TOKEN}"
 
-# ────────────────────────────────────────────────
-# Arabic + Drawing with debug
-# ────────────────────────────────────────────────
+# ----------------------
+# Arabic convert
+# ----------------------
 def convert_arabic(text: str) -> str:
     reshaped = arabic_reshaper.reshape(text)
-    visual = get_display(reshaped)
-    print(f"[ARABIC DEBUG] Original: {text[:60]}...")
-    print(f"[ARABIC DEBUG] Reshaped: {reshaped[:60]}...")
-    print(f"[ARABIC DEBUG] Bidi applied: {visual[:60]}...")
-    return visual
+    return get_display(reshaped)
 
+# ----------------------
+# Drawing helpers
+# ----------------------
 def draw_centered(draw, x, y, text, font, fill="black", already_visual=False):
     if already_visual:
         visual_text = text
@@ -50,14 +61,14 @@ def draw_centered(draw, x, y, text, font, fill="black", already_visual=False):
     draw.text((x, y), visual_text, font=font, fill=fill, anchor="mm")
 
 def wrap_text(draw, text, font, max_width):
-    print("[WRAP DEBUG] Wrapping body text...")
     words = text.split()
     lines = []
     current = ""
     for word in words:
         test_line = f"{current} {word}".strip() if current else word
         reshaped_test = arabic_reshaper.reshape(test_line)
-        bbox = draw.textbbox((0, 0), reshaped_test, font=font)
+        visual_test = get_display(reshaped_test)
+        bbox = draw.textbbox((0, 0), visual_test, font=font)
         width = bbox[2] - bbox[0]
         if width <= max_width:
             current = test_line
@@ -67,23 +78,20 @@ def wrap_text(draw, text, font, max_width):
             current = word
     if current:
         lines.append(current)
-    print(f"[WRAP DEBUG] Created {len(lines)} logical lines")
-    for i, line in enumerate(lines, 1):
-        print(f"  Line {i}: {line}")
     return lines
 
 def generate_certificate(choice_word, name, role, star_text):
-    print("[CERT DEBUG] Generating certificate...")
     img = Image.open(TEMPLATE_PATH).convert("RGB")
     draw = ImageDraw.Draw(img)
 
     try:
         font_big = ImageFont.truetype(FONT_PATH, 40)
         font_role = ImageFont.truetype(FONT_PATH, 30)
-        print("[CERT DEBUG] Fonts loaded OK")
+        print("Fonts loaded successfully")
     except Exception as e:
-        print(f"[CERT DEBUG] Font error: {e}")
-        font_big = font_role = ImageFont.load_default()
+        print(f"Font load error: {e}")
+        font_big = ImageFont.load_default()
+        font_role = ImageFont.load_default()
 
     h1 = f"ببالغ الحزن والأسى وبقلوب راضية بقضاء الله وقدره تلقينا نبأ {choice_word}"
     body = (
@@ -107,10 +115,9 @@ def generate_certificate(choice_word, name, role, star_text):
     sample_bbox = draw.textbbox((0, 0), convert_arabic("أ"), font=font_big)
     line_height = sample_bbox[3] - sample_bbox[1]
 
-    for i, logical_line in enumerate(logical_lines, 1):
+    for logical_line in logical_lines:
         reshaped = arabic_reshaper.reshape(logical_line)
         visual_line = get_display(reshaped)
-        print(f"[CERT DEBUG] Drawing line {i}: {visual_line}")
         draw_centered(draw, center_x, y, visual_line, font_big, already_visual=True)
         y += line_height + 20
 
@@ -118,24 +125,25 @@ def generate_certificate(choice_word, name, role, star_text):
     bio.name = "certificate.png"
     img.save(bio, "PNG")
     bio.seek(0)
-    print("[CERT DEBUG] Certificate ready to send")
     return bio
 
-# ────────────────────────────────────────────────
-# Handlers
-# ────────────────────────────────────────────────
+# ----------------------
+# Telegram Handlers (same as before)
+# ----------------------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    keyboard = [[InlineKeyboardButton("وفاة", callback_data="وفاة"),
-                 InlineKeyboardButton("استشهاد", callback_data="استشهاد")]]
-    await update.message.reply_text("اختر نوع الخبر:", reply_markup=InlineKeyboardMarkup(keyboard))
+    keyboard = [
+        [InlineKeyboardButton("وفاة", callback_data="وفاة"),
+         InlineKeyboardButton("استشهاد", callback_data="استشهاد")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await update.message.reply_text("اختر نوع الخبر:", reply_markup=reply_markup)
     return CHOICE
 
 async def choice_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    print(f"[HANDLER] Choice handler - selected: {query.data}")
     await query.answer()
     context.user_data["choice"] = query.data
-    await query.edit_message_text(text="أدخل الاسم الكامل:", reply_markup=None)
+    await query.edit_message_text("أدخل الاسم الكامل:")
     return NAME
 
 async def name_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -163,46 +171,49 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("تم الإلغاء.")
     return ConversationHandler.END
 
-# ────────────────────────────────────────────────
-# Flask app
-# ────────────────────────────────────────────────
+# ----------------------
+# Flask + Webhook setup
+# ----------------------
 flask_app = Flask(__name__)
-application: Application = None
+
+application: Application = None  # global, set later
 
 @flask_app.route('/', methods=['GET'])
 def hello():
-    return "Bot is running (with webhook)"
+    return """
+    <h1 style="text-align: center; margin-top: 100px; font-family: Arial, sans-serif;">
+        مرحباً بالعالم 🌍<br>
+        <small>Hello World from Flask + Telegram Bot!</small>
+    </h1>
+    """
 
 @flask_app.route(WEBHOOK_PATH, methods=['POST'])
 async def webhook():
-    print("[WEBHOOK] Received POST from Telegram")
     if request.headers.get('content-type') == 'application/json':
         json_data = request.get_json(silent=True)
         if json_data:
             update = Update.de_json(json_data, application.bot)
             if update:
-                print("[WEBHOOK] Processing update...")
-                try:
-                    await application.process_update(update)
-                    print("[WEBHOOK] Update processed successfully")
-                except Exception as e:
-                    print(f"[WEBHOOK] Error processing update: {type(e).__name__}: {str(e)}")
-                    import traceback
-                    traceback.print_exc()
-            else:
-                print("[WEBHOOK] Could not parse update")
+                await application.process_update(update)
         return Response(status=200)
-    print("[WEBHOOK] Invalid content-type")
     return Response(status=403)
 
-# ────────────────────────────────────────────────
-# Startup
-# ────────────────────────────────────────────────
-async def main():
-    global application
+# ----------------------
+# Main
+# ----------------------
+if __name__ == "__main__":
+    import threading
 
-    print("[STARTUP] Building application...")
-    application = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
+    print("Current working dir:", os.getcwd())
+    print("Font exists?", os.path.exists(FONT_PATH))
+    print("Template exists?", os.path.exists(TEMPLATE_PATH))
+
+    # Build the application
+    application = (
+        ApplicationBuilder()
+        .token(TELEGRAM_TOKEN)
+        .build()
+    )
 
     conv = ConversationHandler(
         entry_points=[CommandHandler("start", start)],
@@ -213,37 +224,31 @@ async def main():
             BODY: [MessageHandler(filters.TEXT & ~filters.COMMAND, body_input)],
         },
         fallbacks=[CommandHandler("cancel", cancel)],
-        per_message=True,
     )
+
     application.add_handler(conv)
 
-    print("[STARTUP] Initializing application...")
-    await application.initialize()
-    print("[STARTUP] Starting application...")
-    await application.start()
+    async def set_webhook():
+        port = int(os.environ.get("PORT", 5000))
+        host = os.environ.get("RENDER_EXTERNAL_HOSTNAME")  # Render sets this
+        if not host:
+            host = "127.0.0.1"  # fallback for local
+        webhook_url = f"https://{host}{WEBHOOK_PATH}"
+        await application.bot.set_webhook(
+            url=webhook_url,
+            allowed_updates=Update.ALL_TYPES,
+            drop_pending_updates=True  # clean old updates
+        )
+        print(f"Webhook set to: {webhook_url}")
 
-    host = os.environ.get("RENDER_EXTERNAL_HOSTNAME")
-    if not host:
-        host = "127.0.0.1"
-        print("[STARTUP] Warning: using localhost fallback")
-    webhook_url = f"https://{host}{WEBHOOK_PATH}"
+    # Set webhook (only once, at startup)
+    asyncio.run(set_webhook())
 
-    print(f"[STARTUP] Setting webhook: {webhook_url}")
-    await application.bot.set_webhook(
-        url=webhook_url,
-        drop_pending_updates=True,
-        allowed_updates=Update.ALL_TYPES
+    # Run Flask (blocking, receives webhook POSTs from Telegram)
+    print(f"Starting Flask + webhook on port {os.environ.get('PORT', 5000)} ...")
+    flask_app.run(
+        host="0.0.0.0",
+        port=int(os.environ.get("PORT", 5000)),
+        debug=False,
+        use_reloader=False
     )
-    print("[STARTUP] Webhook set successfully")
-
-    port = int(os.environ.get("PORT", 5000))
-    print(f"[STARTUP] Running Flask on port {port}")
-    flask_app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
-
-    # Cleanup (rarely reached in production)
-    print("[SHUTDOWN] Stopping application...")
-    await application.stop()
-    await application.shutdown()
-
-if __name__ == "__main__":
-    asyncio.run(main())
