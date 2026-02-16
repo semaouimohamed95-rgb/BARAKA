@@ -36,9 +36,13 @@ def convert_arabic(text: str) -> str:
     reshaped = arabic_reshaper.reshape(text)
     return get_display(reshaped)
 
-def draw_centered(draw, x, y, text, font, fill="black"):
-    visual = convert_arabic(text)
-    draw.text((x, y), visual, font=font, fill=fill, anchor="mm")
+def draw_centered(draw, x_center, y, logical_text, font, fill="black"):
+    visual_text = convert_arabic(logical_text)
+    bbox = draw.textbbox((0,0), visual_text, font=font)
+    text_width = bbox[2] - bbox[0]
+    text_height = bbox[3] - bbox[1]
+    draw.text((x_center - text_width//2, y - text_height//2), visual_text, font=font, fill=fill)
+
 
 def wrap_text(draw, text, font, max_width):
     words = text.split()
@@ -167,3 +171,4 @@ if __name__ == "__main__":
         url_path=TELEGRAM_TOKEN,
         webhook_url=WEBHOOK_URL,
     )
+
