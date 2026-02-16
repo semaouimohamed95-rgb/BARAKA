@@ -19,23 +19,18 @@ from telegram.ext import (
 # ----------------------
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN") or "YOUR_TOKEN_HERE"
 PORT = int(os.environ.get("PORT", 10000))
-WEBHOOK_URL = os.environ.get("WEBHOOK_URL") or f"https://your-app.onrender.com/{TELEGRAM_TOKEN}"
+RENDER_NAME = os.environ.get("RENDER_SERVICE_NAME")
+WEBHOOK_URL = f"https://{RENDER_NAME}.onrender.com/{TELEGRAM_TOKEN}"
 
 TEMPLATE_PATH = "certificate_template.png"
 FONT_PATH = "NotoKufiArabic-Bold.ttf"
 
-POSITIONS = {
-    "h1": (651, 470),
-    "name": (650, 545),
-    "role": (652, 615),
-    "body": 665
-}
-
+POSITIONS = {"h1": (651, 470), "name": (650, 545), "role": (652, 615), "body": 665}
 X_LEFT, X_RIGHT = 28, 1241
 CHOICE, NAME, ROLE, BODY = range(4)
 
 # ----------------------
-# Arabic Helpers
+# Arabic helpers
 # ----------------------
 def convert_arabic(text: str) -> str:
     reshaped = arabic_reshaper.reshape(text)
@@ -103,7 +98,7 @@ def generate_certificate(choice_word, name, role, star_text):
     return bio
 
 # ----------------------
-# Telegram Handlers
+# Handlers
 # ----------------------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
@@ -128,7 +123,7 @@ async def name_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def role_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["role"] = update.message.text
-    await update.message.reply_text("أدخل النص الذي مكان النجوم:")
+    await update.message.reply_text("أدخل نص النجوم:")
     return BODY
 
 async def body_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -152,7 +147,7 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 if __name__ == "__main__":
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
 
-    conv_handler = ConversationHandler(
+    conv = ConversationHandler(
         entry_points=[CommandHandler("start", start)],
         states={
             CHOICE: [CallbackQueryHandler(choice_handler)],
@@ -162,11 +157,10 @@ if __name__ == "__main__":
         },
         fallbacks=[CommandHandler("cancel", cancel)],
     )
+    app.add_handler(conv)
 
-    app.add_handler(conv_handler)
-
-    # ---------- Run on Render / Webhook ----------
-    print("Bot running on Render with webhook...")
+    # Important: Set the webhook properly
+    print("Setting webhook and running bot...")
     app.run_webhook(
         listen="0.0.0.0",
         port=PORT,
