@@ -33,7 +33,7 @@ FONT_PATH_BOLD = "NotoKufiArabic-Bold.ttf"
 # Positions
 POSITIONS = {
     "h1": (651, 470),
-    "name": (650, 545),
+    "name": (650, 600),
     "role": (652, 615),
     "body": 665
 }
@@ -213,3 +213,4 @@ if __name__ == "__main__":
         url_path=TELEGRAM_TOKEN,
         webhook_url=WEBHOOK_URL,
     )
+
