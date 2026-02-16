@@ -211,7 +211,16 @@ async def webhook():
 # ────────────────────────────────────────────────
 async def main():
     global application
-    application = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
+
+    print("Current dir:", os.getcwd())
+    print("Font exists?", os.path.exists(FONT_PATH))
+    print("Template exists?", os.path.exists(TEMPLATE_PATH))
+
+    application = (
+        ApplicationBuilder()
+        .token(TELEGRAM_TOKEN)
+        .build()
+    )
 
     conv = ConversationHandler(
         entry_points=[CommandHandler("start", start)],
@@ -222,18 +231,44 @@ async def main():
             BODY: [MessageHandler(filters.TEXT & ~filters.COMMAND, body_input)],
         },
         fallbacks=[CommandHandler("cancel", cancel)],
-        per_message=True,          # ← IMPORTANT FIX
+        per_message=True,               # helps with callback query state tracking
     )
+
     application.add_handler(conv)
 
+    # ──── THIS IS THE MISSING PART ────
+    print("Initializing application...")
     await application.initialize()
+    print("Application initialized successfully")
 
-    host = os.environ.get("RENDER_EXTERNAL_HOSTNAME", "127.0.0.1")
+    # Set webhook
+    host = os.environ.get("RENDER_EXTERNAL_HOSTNAME")
+    if not host:
+        print("Warning: RENDER_EXTERNAL_HOSTNAME not found → using localhost fallback")
+        host = "127.0.0.1"
     webhook_url = f"https://{host}{WEBHOOK_PATH}"
-    await application.bot.set_webhook(url=webhook_url, drop_pending_updates=True)
-    print(f"Webhook set: {webhook_url}")
 
-    flask_app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)), debug=False, use_reloader=False)
+    print(f"Setting webhook → {webhook_url}")
+    await application.bot.set_webhook(
+        url=webhook_url,
+        drop_pending_updates=True,
+        allowed_updates=Update.ALL_TYPES
+    )
+    print("Webhook set successfully")
+
+    # Run Flask (blocking)
+    port = int(os.environ.get("PORT", 5000))
+    print(f"Starting Flask on 0.0.0.0:{port}")
+    flask_app.run(
+        host="0.0.0.0",
+        port=port,
+        debug=False,
+        use_reloader=False
+    )
+
+    # Cleanup (rarely reached, but good practice)
+    print("Shutting down application...")
+    await application.shutdown()
 
 if __name__ == "__main__":
     asyncio.run(main())
