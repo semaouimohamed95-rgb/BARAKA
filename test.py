@@ -3,7 +3,7 @@ from io import BytesIO
 from PIL import Image, ImageDraw, ImageFont
 import arabic_reshaper
 from bidi.algorithm import get_display
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, Bot
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
@@ -13,15 +13,14 @@ from telegram.ext import (
     CallbackQueryHandler,
     filters,
 )
-from flask import Flask, request, jsonify
-import asyncio
 
 # ----------------------
 # Config
 # ----------------------
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN") or "YOUR_TOKEN_HERE"
 PORT = int(os.environ.get("PORT", 10000))
-WEBHOOK_URL = os.environ.get("WEBHOOK_URL") or f"https://your-app.onrender.com/{TELEGRAM_TOKEN}"
+RENDER_NAME = os.environ.get("RENDER_SERVICE_NAME")
+WEBHOOK_URL = f"https://{RENDER_NAME}.onrender.com/{TELEGRAM_TOKEN}" if RENDER_NAME else None
 
 TEMPLATE_PATH = "certificate_template.png"
 FONT_PATH = "NotoKufiArabic-Bold.ttf"
@@ -148,49 +147,28 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 # ----------------------
-# Flask for Render Web
-# ----------------------
-app_web = Flask(__name__)
-bot = Bot(token=TELEGRAM_TOKEN)
-app_bot = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
-
-conv_handler = ConversationHandler(
-    entry_points=[CommandHandler("start", start)],
-    states={
-        CHOICE: [CallbackQueryHandler(choice_handler)],
-        NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, name_input)],
-        ROLE: [MessageHandler(filters.TEXT & ~filters.COMMAND, role_input)],
-        BODY: [MessageHandler(filters.TEXT & ~filters.COMMAND, body_input)],
-    },
-    fallbacks=[CommandHandler("cancel", cancel)],
-)
-app_bot.add_handler(conv_handler)
-
-@app_web.route("/", methods=["GET"])
-def home():
-    return "<h1>Certificate Bot is running ✅</h1>"
-
-@app_web.route(f"/{TELEGRAM_TOKEN}", methods=["POST"])
-def telegram_webhook():
-    data = request.get_json(force=True)
-    update = Update.de_json(data, bot)
-    asyncio.run(app_bot.process_update(update))
-    return jsonify({"ok": True})
-
-# ----------------------
-# Main: Local / Render
+# Main
 # ----------------------
 if __name__ == "__main__":
-    # ---------- LOCAL POLLING ----------
-    if os.environ.get("RENDER") != "true":
-        print("Bot running locally with polling...")
-        app_bot.run_polling()
-    
-    # ---------- RENDER / PRODUCTION WEBHOOK ----------
-    else:
-        async def start_webhook():
-            await bot.set_webhook(WEBHOOK_URL)
-            app_web.run(host="0.0.0.0", port=PORT)
+    app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
 
-        print("Bot running on Render with webhook...")
-        asyncio.run(start_webhook())
+    conv_handler = ConversationHandler(
+        entry_points=[CommandHandler("start", start)],
+        states={
+            CHOICE: [CallbackQueryHandler(choice_handler)],
+            NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, name_input)],
+            ROLE: [MessageHandler(filters.TEXT & ~filters.COMMAND, role_input)],
+            BODY: [MessageHandler(filters.TEXT & ~filters.COMMAND, body_input)],
+        },
+        fallbacks=[CommandHandler("cancel", cancel)],
+    )
+
+    app.add_handler(conv_handler)
+
+    # ---------- RUN WEBHOOK ----------
+    app.run_webhook(
+        listen="0.0.0.0",
+        port=PORT,
+        url_path=TELEGRAM_TOKEN,
+        webhook_url=WEBHOOK_URL,
+    )
