@@ -25,7 +25,7 @@ from telegram.ext import (
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 PORT = int(os.environ.get("PORT", 10000))
 RENDER_NAME = os.environ.get("RENDER_SERVICE_NAME")
-WEBHOOK_URL = f"https://{RENDER_NAME}.onrender.com/{TELEGRAM_TOKEN}"
+WEBHOOK_URL = f"https://{RENDER_NAME}://{TELEGRAM_TOKEN}"
 
 TEMPLATE_PATH = "certificate_template.png"
 FONT_PATH = "NotoKufiArabic-Bold.ttf"
@@ -42,21 +42,22 @@ X_LEFT, X_RIGHT = 28, 1241
 CHOICE, NAME, ROLE, BODY = range(4)
 
 # ----------------------
-# Arabic convert (only once per draw)
+# Arabic convert (Fixed)
 # ----------------------
 def convert_arabic(text: str) -> str:
+    # Reshape handles the letter connections (e.g., عـبـار)
     reshaped = arabic_reshaper.reshape(text)
+    # get_display handles the Right-to-Left direction
     return get_display(reshaped)
 
 # ----------------------
 # Drawing
 # ----------------------
 def draw_centered(draw, x, y, logical_text, font, fill="black"):
-    visual_text = convert_arabic(logical_text)  # convert once
-    bbox = draw.textbbox((0, 0), visual_text, font=font)
-    w = bbox[2] - bbox[0]
-    h = bbox[3] - bbox[1]
-    draw.text((x - w // 2, y - h // 2), visual_text, font=font, fill=fill)
+    visual_text = convert_arabic(logical_text)
+    # Use anchor="mm" for true middle-middle alignment in modern Pillow
+    # This prevents manual bbox calculation errors
+    draw.text((x, y), visual_text, font=font, fill=fill, anchor="mm")
 
 def wrap_text(draw, text, font, max_width):
     """Wrap using logical Arabic, convert only for measuring."""
@@ -64,10 +65,12 @@ def wrap_text(draw, text, font, max_width):
     lines = []
     current = ""
     for word in words:
+        # Check if current line + next word fits
         test_line = f"{current} {word}".strip()
         visual = convert_arabic(test_line)
         bbox = draw.textbbox((0, 0), visual, font=font)
         width = bbox[2] - bbox[0]
+        
         if width <= max_width:
             current = test_line
         else:
@@ -107,12 +110,14 @@ def generate_certificate(choice_word, name, role, star_text):
     max_width = X_RIGHT - X_LEFT
 
     lines = wrap_text(draw, body, font_big, max_width)
+    
+    # Calculate line height using a standard character
     sample_bbox = draw.textbbox((0, 0), convert_arabic("أ"), font=font_big)
     line_height = sample_bbox[3] - sample_bbox[1]
 
     for line in lines:
         draw_centered(draw, center_x, y, line, font_big)
-        y += line_height + 10
+        y += line_height + 20 # Increased spacing for Kufi font readability
 
     bio = BytesIO()
     bio.name = "certificate.png"
