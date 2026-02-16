@@ -15,7 +15,9 @@ from telegram.ext import (
     filters,
 )
 
-from flask import Flask, send_file
+from flask import Flask
+import asyncio
+import threading
 
 # ----------------------
 # Config
@@ -156,35 +158,34 @@ app_web = Flask(__name__)
 
 @app_web.route("/")
 def home():
-    # Empty page, just for Render deployment
     return "<h1>Certificate Bot is running ✅</h1>"
 
 # ----------------------
 # Main
 # ----------------------
+def run_telegram():
+    # Create new asyncio loop for this thread
+    asyncio.set_event_loop(asyncio.new_event_loop())
+    app_bot = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
+
+    conv = ConversationHandler(
+        entry_points=[CommandHandler("start", start)],
+        states={
+            CHOICE: [CallbackQueryHandler(choice_handler, per_message=True)],
+            NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, name_input)],
+            ROLE: [MessageHandler(filters.TEXT & ~filters.COMMAND, role_input)],
+            BODY: [MessageHandler(filters.TEXT & ~filters.COMMAND, body_input)],
+        },
+        fallbacks=[CommandHandler("cancel", cancel)],
+    )
+
+    app_bot.add_handler(conv)
+    print("Telegram Bot running...")
+    app_bot.run_polling()
+
 if __name__ == "__main__":
-    from threading import Thread
-
     # Run Telegram bot in a separate thread
-    def run_telegram():
-        app_bot = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
-
-        conv = ConversationHandler(
-            entry_points=[CommandHandler("start", start)],
-            states={
-                CHOICE: [CallbackQueryHandler(choice_handler)],
-                NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, name_input)],
-                ROLE: [MessageHandler(filters.TEXT & ~filters.COMMAND, role_input)],
-                BODY: [MessageHandler(filters.TEXT & ~filters.COMMAND, body_input)],
-            },
-            fallbacks=[CommandHandler("cancel", cancel)],
-        )
-
-        app_bot.add_handler(conv)
-        print("Telegram Bot running...")
-        app_bot.run_polling()
-
-    Thread(target=run_telegram).start()
+    threading.Thread(target=run_telegram, daemon=True).start()
 
     # Run Flask web server for Render
     port = int(os.environ.get("PORT", 10000))
