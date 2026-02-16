@@ -1,5 +1,12 @@
 #fgjk
 import os
+
+print("=== DEBUG: File system info on Render ===")
+print("Current working directory:", os.getcwd())
+print("Absolute path being checked:", os.path.abspath(FONT_PATH))
+print("Font file exists?", os.path.exists(FONT_PATH))
+print("Is it a file?", os.path.isfile(FONT_PATH) if os.path.exists(FONT_PATH) else "N/A")
+print("Files in current folder:", sorted(os.listdir('.')))  # ← this will show if the .ttf is really there
 from io import BytesIO
 from PIL import Image, ImageDraw, ImageFont
 import arabic_reshaper
@@ -220,4 +227,5 @@ if __name__ == "__main__":
 
     # Run Telegram bot in **main thread** (blocking call)
     run_telegram_bot()
+
 
