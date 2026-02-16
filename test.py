@@ -58,8 +58,7 @@ def home():
 # =====================================================
 
 def convert_arabic(text: str) -> str:
-    reshaped = arabic_reshaper.reshape(text)
-    return get_display(reshaped)
+    return text
 
 
 # =====================================================
@@ -249,3 +248,4 @@ def telegram_webhook():
 
 if __name__ == "__main__":
     appd.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
+
