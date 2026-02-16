@@ -1,20 +1,11 @@
 import os
+import asyncio
 from io import BytesIO
+from flask import Flask, request
 from PIL import Image, ImageDraw, ImageFont
 import arabic_reshaper
 from bidi.algorithm import get_display
-from flask import Flask, request, jsonify
 
-appd = Flask(__name__)
-@appd.route("/webhook", methods=["POST"])
-def webhook():
-    data = request.json  # Get JSON payload
-    print("Received data:", data)
-
-    return jsonify({
-        "status": "success",
-        "message": "Webhook received!"
-    }), 200
 from telegram import (
     Update,
     InlineKeyboardButton,
@@ -33,14 +24,17 @@ from telegram.ext import (
 # ----------------------
 # Config
 # ----------------------
-TELEGRAM_TOKEN = "8473065940:AAEBfJD0THr7pHx93SqBrdgc2qbNfU8_lYs" # Set this in your environment
-TEMPLATE_PATH = "certificate_template.png"
-FONT_PATH = "NotoKufiArabic-Bold.ttf"
+
+TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+TEMPLATE_PATH = os.path.join(BASE_DIR, "certificate_template.png")
+FONT_PATH = os.path.join(BASE_DIR, "NotoKufiArabic-Bold.ttf")
 
 POSITIONS = {
     "h1": (651, 470),
-    "name": (650, 545),
-    "role": (652, 615),
+    "name": (650, 600),
+    "role": (652, 655),
     "body": 665
 }
 
@@ -48,36 +42,56 @@ X_LEFT, X_RIGHT = 28, 1241
 CHOICE, NAME, ROLE, BODY = range(4)
 
 # ----------------------
-# Arabic convert
+# Flask App
 # ----------------------
+
+appd = Flask(__name__)
+
+@appd.route("/")
+def home():
+    return "Bot is alive", 200
+
+
+# ----------------------
+# Arabic Processing
+# ----------------------
+
 def convert_arabic(text: str) -> str:
     return text
 
+
 # ----------------------
-# Drawing
+# Drawing Helpers
 # ----------------------
+
 def draw_centered(draw, x, y, logical_text, font, fill="black"):
     visual_text = convert_arabic(logical_text)
     draw.text((x, y), visual_text, font=font, fill=fill, anchor="mm")
+
 
 def wrap_text(draw, text, font, max_width):
     words = text.split()
     lines = []
     current = ""
+
     for word in words:
         test_line = f"{current} {word}".strip()
         visual = convert_arabic(test_line)
         bbox = draw.textbbox((0, 0), visual, font=font)
         width = bbox[2] - bbox[0]
+
         if width <= max_width:
             current = test_line
         else:
             if current:
                 lines.append(current)
             current = word
+
     if current:
         lines.append(current)
+
     return lines
+
 
 def generate_certificate(choice_word, name, role, star_text):
     img = Image.open(TEMPLATE_PATH).convert("RGB")
@@ -87,6 +101,7 @@ def generate_certificate(choice_word, name, role, star_text):
     font_role = ImageFont.truetype(FONT_PATH, 30)
 
     h1 = f"ببالغ الحزن والأسى وبقلوب راضية بقضاء الله وقدره تلقينا نبأ {choice_word}"
+
     body = (
         "وعلى إثر هذا المصاب الجلل يتقدم الأستاذ عبار صلاح الدين "
         "وبالنيابة عن المكتب الولائي سيدي بلعباس بأصدق التعازي والمواساة "
@@ -115,19 +130,25 @@ def generate_certificate(choice_word, name, role, star_text):
     bio.name = "certificate.png"
     img.save(bio, "PNG")
     bio.seek(0)
+
     return bio
 
+
 # ----------------------
-# Handlers
+# Telegram Handlers
 # ----------------------
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
-        [InlineKeyboardButton("وفاة", callback_data="وفاة"),
-         InlineKeyboardButton("استشهاد", callback_data="استشهاد")]
+        [
+            InlineKeyboardButton("وفاة", callback_data="وفاة"),
+            InlineKeyboardButton("استشهاد", callback_data="استشهاد")
+        ]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     await update.message.reply_text("اختر نوع الخبر:", reply_markup=reply_markup)
     return CHOICE
+
 
 async def choice_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -136,69 +157,82 @@ async def choice_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.edit_message_text("أدخل الاسم الكامل:")
     return NAME
 
+
 async def name_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["name"] = update.message.text
     await update.message.reply_text("أدخل الصفة:")
     return ROLE
 
+
 async def role_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["role"] = update.message.text
-    await update.message.reply_text("أدخل النص الذي مكان النجوم (مثال: لعائلة فلان الكريمة):")
+    await update.message.reply_text("أدخل النص الذي مكان النجوم:")
     return BODY
+
 
 async def body_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["stars"] = update.message.text
+
     bio = generate_certificate(
         context.user_data["choice"],
         context.user_data["name"],
         context.user_data["role"],
         context.user_data["stars"]
     )
+
     await update.message.reply_photo(photo=bio, caption="تم إنشاء الشهادة ✅")
+
     return ConversationHandler.END
+
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("تم الإلغاء.")
     return ConversationHandler.END
 
+
 # ----------------------
-# Main (Local)
+# Telegram Application Setup
 # ----------------------
-import asyncio
 
-async def run_bot():
-    application = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
+loop = asyncio.new_event_loop()
+asyncio.set_event_loop(loop)
 
-    conv = ConversationHandler(
-        entry_points=[CommandHandler("start", start)],
-        states={
-            CHOICE: [CallbackQueryHandler(choice_handler)],
-            NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, name_input)],
-            ROLE: [MessageHandler(filters.TEXT & ~filters.COMMAND, role_input)],
-            BODY: [MessageHandler(filters.TEXT & ~filters.COMMAND, body_input)],
-        },
-        fallbacks=[CommandHandler("cancel", cancel)],
-    )
+application = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
 
-    application.add_handler(conv)
+conv = ConversationHandler(
+    entry_points=[CommandHandler("start", start)],
+    states={
+        CHOICE: [CallbackQueryHandler(choice_handler)],
+        NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, name_input)],
+        ROLE: [MessageHandler(filters.TEXT & ~filters.COMMAND, role_input)],
+        BODY: [MessageHandler(filters.TEXT & ~filters.COMMAND, body_input)],
+    },
+    fallbacks=[CommandHandler("cancel", cancel)],
+)
 
-    await application.initialize()
-    await application.start()
-    return application
+application.add_handler(conv)
 
-loop = asyncio.get_event_loop()
-bot_app = loop.run_until_complete(run_bot())
+loop.run_until_complete(application.initialize())
+loop.run_until_complete(application.start())
 
+
+# ----------------------
+# Webhook Endpoint
+# ----------------------
 
 @appd.route(f"/webhook/{TELEGRAM_TOKEN}", methods=["POST"])
-async def telegram_webhook():
+def telegram_webhook():
     data = request.get_json(force=True)
-    update = Update.de_json(data, bot_app.bot)
-    await bot_app.process_update(update)
+    update = Update.de_json(data, application.bot)
+
+    loop.create_task(application.process_update(update))
+
     return "OK", 200
 
 
+# ----------------------
+# Run Flask
+# ----------------------
+
 if __name__ == "__main__":
     appd.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
-
-
