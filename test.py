@@ -34,8 +34,8 @@ FONT_PATH = os.path.join(BASE_DIR, "NotoKufiArabic-Bold.ttf")
 
 POSITIONS = {
     "h1": (651, 470),
-    "name": (650, 545),
-    "role": (652, 615),
+    "name": (650, 600),
+    "role": (652, 660),
     "body": 665
 }
 
@@ -111,7 +111,7 @@ def generate_certificate(choice_word, name, role, star_text):
         "ويسكنه الفردوس الأعلى ويلهم ذويه الصبر والسلوان."
     )
 
-    draw_centered(draw, *POSITIONS["h1"], h1, font_big)
+    draw_centered(draw, *POSITIONS["h1"], h1,  ImageFont.truetype(FONT_PATH, 30))
     draw_centered(draw, *POSITIONS["name"], name, font_big, "white")
     draw_centered(draw, *POSITIONS["role"], role, font_role, "green")
 
@@ -248,4 +248,5 @@ def telegram_webhook():
 
 if __name__ == "__main__":
     appd.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
+
 
