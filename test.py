@@ -25,8 +25,7 @@ from telegram.ext import (
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 PORT = int(os.environ.get("PORT", 10000))
 RENDER_NAME = os.environ.get("RENDER_SERVICE_NAME")
-WEBHOOK_URL = f"https://{RENDER_NAME}/{TELEGRAM_TOKEN}"
-
+WEBHOOK_URL = f"https://{RENDER_NAME}.onrender.com/{TELEGRAM_TOKEN}"
 TEMPLATE_PATH = "certificate_template.png"
 FONT_PATH = "NotoKufiArabic-Bold.ttf"
 
@@ -196,4 +195,5 @@ if __name__ == "__main__":
         url_path=TELEGRAM_TOKEN,
         webhook_url=WEBHOOK_URL,
     )
+
 
