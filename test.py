@@ -43,40 +43,28 @@ CHOICE, NAME, ROLE, BODY = range(4)
 WEBHOOK_PATH = f"/{TELEGRAM_TOKEN}"
 
 # ────────────────────────────────────────────────
-# Arabic helpers
+# Arabic helpers (unchanged from last working version)
 # ────────────────────────────────────────────────
 def convert_arabic(text: str) -> str:
     reshaped = arabic_reshaper.reshape(text)
     return get_display(reshaped)
 
-# ────────────────────────────────────────────────
-# Drawing helpers
-# ────────────────────────────────────────────────
 def draw_centered(draw, x, y, text, font, fill="black", already_visual=False):
     if already_visual:
         visual_text = text
-        # print("[DEBUG] Drawing pre-bidi text:", text[:40])  # uncomment for debug
     else:
         visual_text = convert_arabic(text)
-        # print("[DEBUG] Drawing converted text:", visual_text[:40])
     draw.text((x, y), visual_text, font=font, fill=fill, anchor="mm")
 
 def wrap_text(draw, text, font, max_width):
-    """
-    Wraps text using only reshaper (no bidi) for width calculation.
-    This helps keep wrapping more consistent between environments.
-    Returns list of logical (original order) lines.
-    """
     words = text.split()
     lines = []
     current = ""
     for word in words:
         test_line = f"{current} {word}".strip() if current else word
         reshaped_test = arabic_reshaper.reshape(test_line)
-        # ─── IMPORTANT: NO get_display here ───
         bbox = draw.textbbox((0, 0), reshaped_test, font=font)
         width = bbox[2] - bbox[0]
-
         if width <= max_width:
             current = test_line
         else:
@@ -109,21 +97,17 @@ def generate_certificate(choice_word, name, role, star_text):
         "ويسكنه الفردوس الأعلى ويلهم ذويه الصبر والسلوان."
     )
 
-    # Single line parts
     draw_centered(draw, *POSITIONS["h1"], h1, font_big)
     draw_centered(draw, *POSITIONS["name"], name, font_big, "white")
     draw_centered(draw, *POSITIONS["role"], role, font_role, "green")
 
-    # Body - multi-line
     y = POSITIONS["body"]
     center_x = (X_LEFT + X_RIGHT) // 2
     max_width = X_RIGHT - X_LEFT
 
     logical_lines = wrap_text(draw, body, font_big, max_width)
 
-    # Line height (using a sample reshaped character)
-    sample = convert_arabic("أ")
-    sample_bbox = draw.textbbox((0, 0), sample, font=font_big)
+    sample_bbox = draw.textbbox((0, 0), convert_arabic("أ"), font=font_big)
     line_height = sample_bbox[3] - sample_bbox[1]
 
     print(f"[DEBUG] Body wrapped into {len(logical_lines)} lines")
@@ -131,7 +115,7 @@ def generate_certificate(choice_word, name, role, star_text):
     for i, logical_line in enumerate(logical_lines, 1):
         reshaped = arabic_reshaper.reshape(logical_line)
         visual_line = get_display(reshaped)
-        print(f"[DEBUG] Line {i}: {visual_line[:60]}...")  # short preview
+        print(f"[DEBUG] Line {i}: {visual_line[:60]}...")
         draw_centered(draw, center_x, y, visual_line, font_big, already_visual=True)
         y += line_height + 20
 
@@ -142,7 +126,7 @@ def generate_certificate(choice_word, name, role, star_text):
     return bio
 
 # ────────────────────────────────────────────────
-# Telegram Handlers
+# Telegram Handlers (unchanged)
 # ────────────────────────────────────────────────
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
@@ -213,9 +197,11 @@ async def webhook():
     return Response(status=403)
 
 # ────────────────────────────────────────────────
-# Main
+# Main - Startup / Shutdown
 # ────────────────────────────────────────────────
-if __name__ == "__main__":
+async def main():
+    global application
+
     print("Current dir:", os.getcwd())
     print("Font exists?", os.path.exists(FONT_PATH))
     print("Template exists?", os.path.exists(TEMPLATE_PATH))
@@ -239,22 +225,30 @@ if __name__ == "__main__":
 
     application.add_handler(conv)
 
-    async def set_webhook():
-        host = os.environ.get("RENDER_EXTERNAL_HOSTNAME", "127.0.0.1")
-        port = os.environ.get("PORT", "5000")
-        webhook_url = f"https://{host}{WEBHOOK_PATH}"
-        await application.bot.set_webhook(
-            url=webhook_url,
-            drop_pending_updates=True
-        )
-        print(f"Webhook configured: {webhook_url}")
+    print("Initializing application...")
+    await application.initialize()
 
-    asyncio.run(set_webhook())
+    host = os.environ.get("RENDER_EXTERNAL_HOSTNAME", "127.0.0.1")
+    port = os.environ.get("PORT", "5000")
+    webhook_url = f"https://{host}{WEBHOOK_PATH}"
+    print(f"Setting webhook to: {webhook_url}")
+    await application.bot.set_webhook(
+        url=webhook_url,
+        drop_pending_updates=True
+    )
 
-    print(f"Starting server on port {os.environ.get('PORT', 5000)}")
+    print(f"Starting Flask server on port {port}")
+    # Flask runs synchronously → we block here
     flask_app.run(
         host="0.0.0.0",
-        port=int(os.environ.get("PORT", 5000)),
+        port=int(port),
         debug=False,
         use_reloader=False
     )
+
+    # Cleanup on shutdown (won't reach here in normal run, but good to have)
+    print("Shutting down application...")
+    await application.shutdown()
+
+if __name__ == "__main__":
+    asyncio.run(main())
