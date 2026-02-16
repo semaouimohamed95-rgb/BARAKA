@@ -4,11 +4,7 @@ from PIL import Image, ImageDraw, ImageFont
 import arabic_reshaper
 from bidi.algorithm import get_display
 
-from telegram import (
-    Update,
-    InlineKeyboardButton,
-    InlineKeyboardMarkup,
-)
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
@@ -19,13 +15,12 @@ from telegram.ext import (
     filters,
 )
 
+from flask import Flask, send_file
+
 # ----------------------
 # Config
 # ----------------------
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
-PORT = int(os.environ.get("PORT", 10000))
-RENDER_NAME = os.environ.get("RENDER_SERVICE_NAME")
-WEBHOOK_URL = f"https://{RENDER_NAME}.onrender.com/{TELEGRAM_TOKEN}"
 TEMPLATE_PATH = "certificate_template.png"
 FONT_PATH = "NotoKufiArabic-Bold.ttf"
 
@@ -37,39 +32,31 @@ POSITIONS = {
 }
 
 X_LEFT, X_RIGHT = 28, 1241
-
 CHOICE, NAME, ROLE, BODY = range(4)
 
 # ----------------------
-# Arabic convert (Fixed)
+# Arabic convert
 # ----------------------
 def convert_arabic(text: str) -> str:
-    # Reshape handles the letter connections (e.g., عـبـار)
     reshaped = arabic_reshaper.reshape(text)
-    # get_display handles the Right-to-Left direction
     return get_display(reshaped)
 
 # ----------------------
-# Drawing
+# Drawing functions
 # ----------------------
 def draw_centered(draw, x, y, logical_text, font, fill="black"):
     visual_text = convert_arabic(logical_text)
-    # Use anchor="mm" for true middle-middle alignment in modern Pillow
-    # This prevents manual bbox calculation errors
     draw.text((x, y), visual_text, font=font, fill=fill, anchor="mm")
 
 def wrap_text(draw, text, font, max_width):
-    """Wrap using logical Arabic, convert only for measuring."""
     words = text.split()
     lines = []
     current = ""
     for word in words:
-        # Check if current line + next word fits
         test_line = f"{current} {word}".strip()
         visual = convert_arabic(test_line)
         bbox = draw.textbbox((0, 0), visual, font=font)
         width = bbox[2] - bbox[0]
-        
         if width <= max_width:
             current = test_line
         else:
@@ -87,10 +74,7 @@ def generate_certificate(choice_word, name, role, star_text):
     font_big = ImageFont.truetype(FONT_PATH, 40)
     font_role = ImageFont.truetype(FONT_PATH, 30)
 
-    # H1 constant
     h1 = f"ببالغ الحزن والأسى وبقلوب راضية بقضاء الله وقدره تلقينا نبأ {choice_word}"
-
-    # Body constant
     body = (
         "وعلى إثر هذا المصاب الجلل يتقدم الأستاذ عبار صلاح الدين "
         "وبالنيابة عن المكتب الولائي سيدي بلعباس بأصدق التعازي والمواساة "
@@ -99,7 +83,6 @@ def generate_certificate(choice_word, name, role, star_text):
         "ويسكنه الفردوس الأعلى ويلهم ذويه الصبر والسلوان."
     )
 
-    # Draw everything
     draw_centered(draw, *POSITIONS["h1"], h1, font_big)
     draw_centered(draw, *POSITIONS["name"], name, font_big, "white")
     draw_centered(draw, *POSITIONS["role"], role, font_role, "green")
@@ -109,14 +92,12 @@ def generate_certificate(choice_word, name, role, star_text):
     max_width = X_RIGHT - X_LEFT
 
     lines = wrap_text(draw, body, font_big, max_width)
-    
-    # Calculate line height using a standard character
     sample_bbox = draw.textbbox((0, 0), convert_arabic("أ"), font=font_big)
     line_height = sample_bbox[3] - sample_bbox[1]
 
     for line in lines:
         draw_centered(draw, center_x, y, line, font_big)
-        y += line_height + 20 # Increased spacing for Kufi font readability
+        y += line_height + 20
 
     bio = BytesIO()
     bio.name = "certificate.png"
@@ -125,7 +106,7 @@ def generate_certificate(choice_word, name, role, star_text):
     return bio
 
 # ----------------------
-# Handlers
+# Telegram Handlers
 # ----------------------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
@@ -150,9 +131,7 @@ async def name_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def role_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["role"] = update.message.text
-    await update.message.reply_text(
-        "أدخل النص الذي مكان النجوم (مثال: لعائلة فلان الكريمة):"
-    )
+    await update.message.reply_text("أدخل النص الذي مكان النجوم (مثال: لعائلة فلان الكريمة):")
     return BODY
 
 async def body_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -171,29 +150,43 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 # ----------------------
+# Flask Web Server (Empty Page)
+# ----------------------
+app_web = Flask(__name__)
+
+@app_web.route("/")
+def home():
+    # Empty page, just for Render deployment
+    return "<h1>Certificate Bot is running ✅</h1>"
+
+# ----------------------
 # Main
 # ----------------------
 if __name__ == "__main__":
-    app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
+    from threading import Thread
 
-    conv = ConversationHandler(
-        entry_points=[CommandHandler("start", start)],
-        states={
-            CHOICE: [CallbackQueryHandler(choice_handler)],
-            NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, name_input)],
-            ROLE: [MessageHandler(filters.TEXT & ~filters.COMMAND, role_input)],
-            BODY: [MessageHandler(filters.TEXT & ~filters.COMMAND, body_input)],
-        },
-        fallbacks=[CommandHandler("cancel", cancel)],
-    )
+    # Run Telegram bot in a separate thread
+    def run_telegram():
+        app_bot = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
 
-    app.add_handler(conv)
+        conv = ConversationHandler(
+            entry_points=[CommandHandler("start", start)],
+            states={
+                CHOICE: [CallbackQueryHandler(choice_handler)],
+                NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, name_input)],
+                ROLE: [MessageHandler(filters.TEXT & ~filters.COMMAND, role_input)],
+                BODY: [MessageHandler(filters.TEXT & ~filters.COMMAND, body_input)],
+            },
+            fallbacks=[CommandHandler("cancel", cancel)],
+        )
 
-    app.run_webhook(
-        listen="0.0.0.0",
-        port=PORT,
-        url_path=TELEGRAM_TOKEN,
-        webhook_url=WEBHOOK_URL,
-    )
+        app_bot.add_handler(conv)
+        print("Telegram Bot running...")
+        app_bot.run_polling()
 
+    Thread(target=run_telegram).start()
 
+    # Run Flask web server for Render
+    port = int(os.environ.get("PORT", 10000))
+    print(f"Web server running on port {port}...")
+    app_web.run(host="0.0.0.0", port=port)
