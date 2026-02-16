@@ -165,8 +165,10 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ----------------------
 # Main (Local)
 # ----------------------
-if __name__ == "__main__":
-    app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
+import asyncio
+
+async def run_bot():
+    application = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
 
     conv = ConversationHandler(
         entry_points=[CommandHandler("start", start)],
@@ -179,9 +181,24 @@ if __name__ == "__main__":
         fallbacks=[CommandHandler("cancel", cancel)],
     )
 
-    app.add_handler(conv)
+    application.add_handler(conv)
 
-    # Run locally using polling
-    print("Bot is running locally...")
-    appd.run(host="0.0.0.0", port=5000)
-    app.run_polling()
+    await application.initialize()
+    await application.start()
+    return application
+
+loop = asyncio.get_event_loop()
+bot_app = loop.run_until_complete(run_bot())
+
+
+@appd.route(f"/webhook/{TELEGRAM_TOKEN}", methods=["POST"])
+async def telegram_webhook():
+    data = request.get_json(force=True)
+    update = Update.de_json(data, bot_app.bot)
+    await bot_app.process_update(update)
+    return "OK", 200
+
+
+if __name__ == "__main__":
+    appd.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
+
