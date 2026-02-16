@@ -3,6 +3,8 @@
 import os
 from io import BytesIO
 from PIL import Image, ImageDraw, ImageFont
+import arabic_reshaper
+from bidi.algorithm import get_display
 
 from telegram import Update
 from telegram.ext import (
@@ -28,7 +30,6 @@ WEBHOOK_URL = f"https://{RENDER_NAME}.onrender.com/{TELEGRAM_TOKEN}"
 TEMPLATE_PATH = "certificate_template.png"
 FONT_PATH_BOLD = "NotoKufiArabic-Bold.ttf"
 
-# Positions
 POSITIONS = {
     "h1": (651, 470),
     "name": (650, 545),
@@ -38,44 +39,39 @@ POSITIONS = {
 
 X_LEFT, X_RIGHT = 28, 1241
 
-# ----------------------
-# Conversation states
-# ----------------------
 H1, NAME, ROLE, BODY = range(4)
+
+
+# ----------------------
+# RTL Conversion (SAFE METHOD)
+# ----------------------
+def convert_arabic(text: str) -> str:
+    """
+    Convert logical Arabic text into correct visual text.
+    """
+    reshaped = arabic_reshaper.reshape(text)
+    bidi_text = get_display(reshaped)
+    return bidi_text
+
 
 # ----------------------
 # Drawing Functions
 # ----------------------
 def draw_centered_text(draw, x_center, y, text, font, fill="black"):
     """
-    Draw centered Arabic text using native RTL support.
+    Draw already-converted Arabic text centered.
     """
-    bbox = draw.textbbox(
-        (0, 0),
-        text,
-        font=font,
-        direction="rtl",
-        language="ar"
-    )
-
+    bbox = draw.textbbox((0, 0), text, font=font)
     w = bbox[2] - bbox[0]
     h = bbox[3] - bbox[1]
 
-    draw.text(
-        (x_center - w // 2, y - h // 2),
-        text,
-        font=font,
-        fill=fill,
-        direction="rtl",
-        language="ar"
-    )
-
-    return h
+    draw.text((x_center - w // 2, y - h // 2), text, font=font, fill=fill)
 
 
 def wrap_rtl_text(draw, text, font, max_width):
     """
-    Wrap Arabic text correctly while measuring width in RTL mode.
+    Wrap Arabic text correctly using logical text,
+    but measure using converted visual form.
     """
     words = text.split()
     lines = []
@@ -84,14 +80,8 @@ def wrap_rtl_text(draw, text, font, max_width):
     for word in words:
         test_line = f"{current_line} {word}".strip()
 
-        bbox = draw.textbbox(
-            (0, 0),
-            test_line,
-            font=font,
-            direction="rtl",
-            language="ar"
-        )
-
+        visual_test = convert_arabic(test_line)
+        bbox = draw.textbbox((0, 0), visual_test, font=font)
         width = bbox[2] - bbox[0]
 
         if width <= max_width:
@@ -116,10 +106,14 @@ def generate_certificate(h1_text, name_text, role_text, body_text):
     font_role = ImageFont.truetype(FONT_PATH_BOLD, 30)
     font_body = ImageFont.truetype(FONT_PATH_BOLD, 40)
 
-    # Header
-    draw_centered_text(draw, *POSITIONS["h1"], h1_text, font_h1, "black")
-    draw_centered_text(draw, *POSITIONS["name"], name_text, font_name, "white")
-    draw_centered_text(draw, *POSITIONS["role"], role_text, font_role, "green")
+    # Convert header fields ONCE
+    h1_visual = convert_arabic(h1_text)
+    name_visual = convert_arabic(name_text)
+    role_visual = convert_arabic(role_text)
+
+    draw_centered_text(draw, *POSITIONS["h1"], h1_visual, font_h1, "black")
+    draw_centered_text(draw, *POSITIONS["name"], name_visual, font_name, "white")
+    draw_centered_text(draw, *POSITIONS["role"], role_visual, font_role, "green")
 
     # Body
     y_body = POSITIONS["body"]
@@ -128,17 +122,12 @@ def generate_certificate(h1_text, name_text, role_text, body_text):
 
     lines = wrap_rtl_text(draw, body_text, font_body, max_width)
 
-    sample_bbox = draw.textbbox(
-        (0, 0),
-        "أ",
-        font=font_body,
-        direction="rtl",
-        language="ar"
-    )
+    sample_bbox = draw.textbbox((0, 0), convert_arabic("أ"), font=font_body)
     line_height = sample_bbox[3] - sample_bbox[1]
 
     for line in lines:
-        draw_centered_text(draw, x_center_body, y_body, line, font_body, "black")
+        visual_line = convert_arabic(line)
+        draw_centered_text(draw, x_center_body, y_body, visual_line, font_body, "black")
         y_body += line_height + 10
 
     bio = BytesIO()
@@ -159,19 +148,16 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def h1_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["h1"] = update.message.text
-    await update.message.reply_text("الآن أدخل الاسم:")
     return NAME
 
 
 async def name_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["name"] = update.message.text
-    await update.message.reply_text("أدخل الدور/الصفة:")
     return ROLE
 
 
 async def role_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["role"] = update.message.text
-    await update.message.reply_text("أخيراً، أدخل نص الجسم (body):")
     return BODY
 
 
@@ -190,7 +176,6 @@ async def body_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("تم إلغاء العملية.")
     return ConversationHandler.END
 
 
