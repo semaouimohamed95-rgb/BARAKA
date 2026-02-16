@@ -3,7 +3,12 @@ from io import BytesIO
 from PIL import Image, ImageDraw, ImageFont
 import arabic_reshaper
 from bidi.algorithm import get_display
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+
+from telegram import (
+    Update,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+)
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
@@ -17,40 +22,33 @@ from telegram.ext import (
 # ----------------------
 # Config
 # ----------------------
-TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN") or "YOUR_TOKEN_HERE"
-PORT = int(os.environ.get("PORT", 10000))
-RENDER_NAME = os.environ.get("RENDER_SERVICE_NAME")
-WEBHOOK_URL = f"https://{RENDER_NAME}.onrender.com/{TELEGRAM_TOKEN}"
-
+TELEGRAM_TOKEN = "8473065940:AAEBfJD0THr7pHx93SqBrdgc2qbNfU8_lYs"  # Set this in your environment
 TEMPLATE_PATH = "certificate_template.png"
 FONT_PATH = "NotoKufiArabic-Bold.ttf"
 
-POSITIONS = {"h1": (651, 470), "name": (650, 545), "role": (652, 615), "body": 665}
+POSITIONS = {
+    "h1": (651, 470),
+    "name": (650, 545),
+    "role": (652, 615),
+    "body": 665
+}
+
 X_LEFT, X_RIGHT = 28, 1241
 CHOICE, NAME, ROLE, BODY = range(4)
 
 # ----------------------
-# Arabic helpers
+# Arabic convert
 # ----------------------
 def convert_arabic(text: str) -> str:
     reshaped = arabic_reshaper.reshape(text)
     return get_display(reshaped)
 
-def draw_centered(draw, x_center, y, logical_text, font, fill="black"):
-    # Reshape Arabic text
-    reshaped_text = arabic_reshaper.reshape(logical_text)
-    
-    # Get display order
-    visual_text = get_display(reshaped_text)
-    
-    # In Pillow 12, anchor='mm' flips RTL text, so we calculate manually
-    bbox = draw.textbbox((0, 0), visual_text, font=font)
-    width = bbox[2] - bbox[0]
-    height = bbox[3] - bbox[1]
-
-    # Draw manually centered
-    draw.text((x_center - width // 2, y - height // 2), visual_text, font=font, fill=fill)
-
+# ----------------------
+# Drawing
+# ----------------------
+def draw_centered(draw, x, y, logical_text, font, fill="black"):
+    visual_text = convert_arabic(logical_text)
+    draw.text((x, y), visual_text, font=font, fill=fill, anchor="mm")
 
 def wrap_text(draw, text, font, max_width):
     words = text.split()
@@ -135,7 +133,7 @@ async def name_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def role_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["role"] = update.message.text
-    await update.message.reply_text("أدخل نص النجوم:")
+    await update.message.reply_text("أدخل النص الذي مكان النجوم (مثال: لعائلة فلان الكريمة):")
     return BODY
 
 async def body_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -153,31 +151,52 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("تم الإلغاء.")
     return ConversationHandler.END
 
-# ----------------------
-# Main
-# ----------------------
+# ────────────────────────────────────────────────
+#   SEPARATE FLASK HELLO WORLD (completely independent)
+# ────────────────────────────────────────────────
+
+from flask import Flask
+
+flask_app = Flask(__name__)
+
+@flask_app.route('/')
+def hello():
+    return """
+    <h1 style="text-align: center; margin-top: 100px; font-family: Arial, sans-serif;">
+        مرحباً بالعالم 🌍<br>
+        <small>Hello World from Flask!</small>
+    </h1>
+    """
+
+# ────────────────────────────────────────────────
+#   Main
+# ────────────────────────────────────────────────
+
 if __name__ == "__main__":
-    app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
+    import threading
 
-    conv = ConversationHandler(
-        entry_points=[CommandHandler("start", start)],
-        states={
-            CHOICE: [CallbackQueryHandler(choice_handler)],
-            NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, name_input)],
-            ROLE: [MessageHandler(filters.TEXT & ~filters.COMMAND, role_input)],
-            BODY: [MessageHandler(filters.TEXT & ~filters.COMMAND, body_input)],
-        },
-        fallbacks=[CommandHandler("cancel", cancel)],
-    )
-    app.add_handler(conv)
+    # Start Telegram bot in a background thread
+    def run_telegram_bot():
+        print("Telegram bot is starting...")
+        app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
 
-    # Important: Set the webhook properly
-    print("Setting webhook and running bot...")
-    app.run_webhook(
-        listen="0.0.0.0",
-        port=PORT,
-        url_path=TELEGRAM_TOKEN,
-        webhook_url=WEBHOOK_URL,
-    )
+        conv = ConversationHandler(
+            entry_points=[CommandHandler("start", start)],
+            states={
+                CHOICE: [CallbackQueryHandler(choice_handler)],
+                NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, name_input)],
+                ROLE: [MessageHandler(filters.TEXT & ~filters.COMMAND, role_input)],
+                BODY: [MessageHandler(filters.TEXT & ~filters.COMMAND, body_input)],
+            },
+            fallbacks=[CommandHandler("cancel", cancel)],
+        )
 
+        app.add_handler(conv)
+        app.run_polling(allowed_updates=Update.ALL_TYPES)
 
+    # Run Flask in main thread (or you can swap them)
+    print("Starting Flask server on http://127.0.0.1:5000 ...")
+    threading.Thread(target=run_telegram_bot, daemon=True).start()
+
+    # Flask will block here
+    flask_app.run(debug=True, use_reloader=False)
