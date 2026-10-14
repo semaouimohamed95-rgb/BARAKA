@@ -118,8 +118,8 @@ def convert_arabic(text: str) -> str:
     if not text:
         return ""
 
-    reshaped = arabic_reshaper.reshape(text)
-    return get_display(reshaped)
+    
+    return get_display(text)
 
 
 # =====================================================
