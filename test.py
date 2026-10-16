@@ -117,8 +117,6 @@ def convert_arabic(text: str) -> str:
     """Shape Arabic letters and reorder them for Pillow."""
     if not text:
         return ""
-
-    
     return get_display(text)
 
 
