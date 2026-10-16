@@ -5,9 +5,7 @@ import logging
 from io import BytesIO
 
 from flask import Flask, request, jsonify
-from PIL import Image, ImageDraw, ImageFont
-import arabic_reshaper
-from bidi.algorithm import get_display
+from PIL import Image, ImageDraw, ImageFont, features
 
 from telegram import (
     Update,
@@ -68,6 +66,11 @@ if not WEBHOOK_URL.startswith("https://"):
         "WEBHOOK_URL must be the public HTTPS URL of your Render service."
     )
 
+if not features.check("raqm"):
+    raise RuntimeError(
+        "Pillow RAQM layout is unavailable (libraqm/fribidi/harfbuzz missing)."
+    )
+
 for file_path in (TEMPLATE_PATH, FONT_PATH):
     if not os.path.isfile(file_path):
         raise FileNotFoundError(
@@ -110,29 +113,18 @@ def health():
 
 
 # =====================================================
-# ARABIC TEXT PROCESSING
-# =====================================================
-
-def convert_arabic(text: str) -> str:
-    """Connect letters (reshape) then reorder for visual RTL (bidi)."""
-    if not text:
-        return ""
-    return get_display(arabic_reshaper.reshape(text))
-
-
-# =====================================================
 # IMAGE GENERATION
 # =====================================================
 
 def draw_centered(draw, x, y, logical_text, font, fill="black"):
-    visual_text = convert_arabic(logical_text)
-
     draw.text(
         (x, y),
-        visual_text,
+        logical_text,
         font=font,
         fill=fill,
         anchor="mm",
+        direction="rtl",
+        language="ar",
     )
 
 
@@ -144,12 +136,13 @@ def wrap_text(draw, text, font, max_width):
 
     for word in words:
         candidate = f"{current} {word}".strip()
-        visual = convert_arabic(candidate)
 
         bbox = draw.textbbox(
             (0, 0),
-            visual,
+            candidate,
             font=font,
+            direction="rtl",
+            language="ar",
         )
         width = bbox[2] - bbox[0]
 
@@ -226,8 +219,10 @@ def generate_certificate(choice_word, name, role, star_text):
 
     sample_bbox = draw.textbbox(
         (0, 0),
-        convert_arabic("أ"),
+        "أ",
         font=font_big,
+        direction="rtl",
+        language="ar",
     )
 
     line_height = sample_bbox[3] - sample_bbox[1]
