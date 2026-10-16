@@ -1,4 +1,3 @@
-
 import os
 import asyncio
 import threading
@@ -87,6 +86,7 @@ appd = Flask(__name__)
 bot_ready = threading.Event()
 bot_startup_error = None
 
+
 @appd.route("/", methods=["GET"])
 def home():
     if bot_ready.is_set():
@@ -114,10 +114,10 @@ def health():
 # =====================================================
 
 def convert_arabic(text: str) -> str:
-    """Shape Arabic letters and reorder them for Pillow."""
+    """Connect letters (reshape) then reorder for visual RTL (bidi)."""
     if not text:
         return ""
-    return get_display(text)
+    return get_display(arabic_reshaper.reshape(text))
 
 
 # =====================================================
@@ -133,7 +133,6 @@ def draw_centered(draw, x, y, logical_text, font, fill="black"):
         font=font,
         fill=fill,
         anchor="mm",
-        direction="rtl",
     )
 
 
@@ -151,7 +150,6 @@ def wrap_text(draw, text, font, max_width):
             (0, 0),
             visual,
             font=font,
-            direction="rtl",
         )
         width = bbox[2] - bbox[0]
 
@@ -163,7 +161,6 @@ def wrap_text(draw, text, font, max_width):
 
             current = word
 
-            # A single word may be wider than the available area.
             if not lines and width > max_width:
                 logger.warning(
                     "A word exceeds the configured text width."
@@ -231,7 +228,6 @@ def generate_certificate(choice_word, name, role, star_text):
         (0, 0),
         convert_arabic("أ"),
         font=font_big,
-        direction="rtl",
     )
 
     line_height = sample_bbox[3] - sample_bbox[1]
@@ -448,7 +444,6 @@ async def init_bot():
     try:
         await application.initialize()
 
-        # Register the public HTTPS webhook with Telegram.
         await application.bot.set_webhook(
             url=FULL_WEBHOOK_URL,
             allowed_updates=Update.ALL_TYPES,
@@ -467,7 +462,6 @@ async def init_bot():
 
         logger.exception("Bot initialization failed.")
 
-        # Do not falsely report that the bot is ready.
         bot_ready.clear()
 
 
@@ -501,7 +495,6 @@ def telegram_webhook():
     if not bot_ready.is_set():
         return "Bot not ready", 503
 
-    # Reject malformed JSON rather than silently processing it.
     data = request.get_json(silent=True)
 
     if not isinstance(data, dict):
@@ -515,7 +508,6 @@ def telegram_webhook():
             loop,
         )
 
-        # Report unexpected processing failures in Render Logs.
         def report_processing_error(fut):
             try:
                 fut.result()
